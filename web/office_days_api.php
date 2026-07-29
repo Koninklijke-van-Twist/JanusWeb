@@ -38,8 +38,11 @@ if ($end < $start) {
 }
 
 $rows = [];
-foreach (auth_users_with_access('urentracker') as $email) {
-    $data = hours_load($email, '');
+foreach (hours_list_users_with_data() as $email) {
+    $data = hours_load_existing($email);
+    if ($data === null) {
+        continue;
+    }
     $name = hours_resolve_user_name($data, $email);
     $missing = hours_missing_days_in_range($data, $start, $end);
     $missingLabels = [];

@@ -19,21 +19,27 @@ if (is_trusted_requester()) {
         @session_start();
     }
 
-    $currentEmail = strtolower(trim((string) ($_SESSION['user']['email'] ?? '')));
-    $defaultAllowedUser = strtolower(trim((string) ($allowedUsers[0] ?? '')));
-    if ($currentEmail === '' && $defaultAllowedUser !== '') {
-        if (!is_array($_SESSION['user'] ?? null)) {
-            $_SESSION['user'] = [];
-        }
+    $_SESSION['user'] = [];
+    $_SESSION['user']['email'] = "testuser@kvt.nl";
 
-        $_SESSION['user']['email'] = $defaultAllowedUser;
+    $currentEmail = strtolower(trim((string) ($_SESSION['user']['email'] ?? '')));
+    if(isset($allowedUsers))
+    {
+        $defaultAllowedUser = strtolower(trim((string) ($allowedUsers[0] ?? '')));
+        if ($currentEmail === '' && $defaultAllowedUser !== '') {
+            if (!is_array($_SESSION['user'] ?? null)) {
+                $_SESSION['user'] = [];
+            }
+
+            $_SESSION['user']['email'] = $defaultAllowedUser;
+        }
     }
 }
 
 if (!is_trusted_requester()) {
     require __DIR__ . "/../login/lib.php";
 
-    if (
+    if ( isset($allowedUsers) &&
         !array_any($allowedUsers, function ($email) {
             return strtolower((string) $email) === strtolower((string) ($_SESSION['user']['email'] ?? ''));
         })

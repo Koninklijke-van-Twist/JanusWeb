@@ -21,8 +21,11 @@ if ($currentEmail === '') {
 auth_require_page_access('overzicht');
 
 $persons = [];
-foreach (auth_users_with_access('urentracker') as $email) {
-    $data = hours_load($email, '');
+foreach (hours_list_users_with_data() as $email) {
+    $data = hours_load_existing($email);
+    if ($data === null) {
+        continue;
+    }
     $name = hours_resolve_user_name($data, $email);
     $data['UserEmail'] = $email;
     if (trim((string) ($data['UserName'] ?? '')) === '') {
@@ -123,9 +126,19 @@ $canAccessOfficeDays = auth_can_access_page('kantoordagen');
             color: var(--accent-strong);
             padding: 0 10px 0 0;
         }
-        .tabs { display: flex; gap: 10px; flex-wrap: wrap; }
+        .tabs { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+        .person-select {
+            min-width: min(280px, 100%);
+            padding: 10px 14px;
+            border-radius: 999px;
+            border: 1px solid rgba(31, 111, 178, 0.22);
+            background: linear-gradient(180deg, #ffffff 0%, #eef7ff 100%);
+            color: var(--accent-strong);
+            font: inherit;
+            font-weight: 600;
+        }
         .topbar-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-        .nav-link, .tab-button, .nav-button {
+        .nav-link, .nav-button {
             border: 1px solid rgba(31, 111, 178, 0.18);
             background: linear-gradient(180deg, #ffffff 0%, #eef7ff 100%);
             color: var(--accent-strong);
@@ -137,18 +150,12 @@ $canAccessOfficeDays = auth_can_access_page('kantoordagen');
             transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
             text-decoration: none;
         }
-        .nav-link:hover, .tab-button:hover, .nav-button:hover,
-        .nav-link:focus-visible, .tab-button:focus-visible, .nav-button:focus-visible {
+        .nav-link:hover, .nav-button:hover,
+        .nav-link:focus-visible, .nav-button:focus-visible {
             transform: translateY(-1px);
             border-color: rgba(31, 111, 178, 0.45);
             box-shadow: 0 10px 18px rgba(31, 111, 178, 0.12);
             outline: none;
-        }
-        .tab-button.active {
-            background: linear-gradient(180deg, #1f6fb2 0%, #0c4f84 100%);
-            color: #ffffff;
-            border-color: transparent;
-            box-shadow: 0 10px 22px rgba(12, 79, 132, 0.28);
         }
         .status-text { color: var(--muted); font-size: 0.95rem; padding: 0 8px; }
         .person-header {
@@ -353,7 +360,9 @@ $canAccessOfficeDays = auth_can_access_page('kantoordagen');
                 <img src="logo-website.png" alt="KVT">
                 <div class="brand">Overzicht</div>
             </div>
-            <div class="tabs" id="person-tabs"></div>
+            <div class="tabs" id="person-tabs">
+                <select id="personSelect" class="person-select" aria-label="Persoon"></select>
+            </div>
             <div class="topbar-actions">
                 <?php if ($canAccessHourTracker): ?>
                     <a class="nav-link" href="index.php">Urentracker</a>
@@ -407,7 +416,7 @@ $canAccessOfficeDays = auth_can_access_page('kantoordagen');
         let focusedWeekIndex = 0;
         let isAnimating = false;
 
-        const tabsElement = document.getElementById("person-tabs");
+        const personSelect = document.getElementById("personSelect");
         const statusElement = document.getElementById("status-text");
         const headerElement = document.getElementById("person-header");
         const weeksScrollElement = document.getElementById("weeks-scroll");
@@ -417,20 +426,22 @@ $canAccessOfficeDays = auth_can_access_page('kantoordagen');
         const olderBottomButton = document.getElementById("older-bottom");
 
         function initializeTabs() {
-            tabsElement.innerHTML = "";
+            personSelect.innerHTML = "";
             if (personSources.length === 0) {
-                tabsElement.innerHTML = "<div class=\"status-text\">Geen personen beschikbaar</div>";
+                personSelect.disabled = true;
+                const option = document.createElement("option");
+                option.value = "";
+                option.textContent = "Geen personen met data";
+                personSelect.appendChild(option);
                 return;
             }
 
+            personSelect.disabled = false;
             personSources.forEach((person) => {
-                const button = document.createElement("button");
-                button.type = "button";
-                button.className = "tab-button";
-                button.textContent = person.label || person.id;
-                button.dataset.person = person.id;
-                button.addEventListener("click", () => loadPerson(person.id));
-                tabsElement.appendChild(button);
+                const option = document.createElement("option");
+                option.value = person.id;
+                option.textContent = person.label || person.id;
+                personSelect.appendChild(option);
             });
         }
 
@@ -441,7 +452,7 @@ $canAccessOfficeDays = auth_can_access_page('kantoordagen');
                 return;
             }
 
-            setActiveTab(personId);
+            personSelect.value = personId;
             statusElement.textContent = "Gegevens laden...";
             headerElement.innerHTML = "";
             weeksScrollElement.innerHTML = "<div class=\"empty-state\">Gegevens worden geladen...</div>";
@@ -455,12 +466,6 @@ $canAccessOfficeDays = auth_can_access_page('kantoordagen');
             renderHeader(activePersonData);
             renderWeeks();
             statusElement.textContent = (activePersonData.UserName || selected.label || selected.id) + " geladen";
-        }
-
-        function setActiveTab(personId) {
-            tabsElement.querySelectorAll(".tab-button").forEach((button) => {
-                button.classList.toggle("active", button.dataset.person === personId);
-            });
         }
 
         function renderHeader(personData) {
@@ -863,15 +868,20 @@ $canAccessOfficeDays = auth_can_access_page('kantoordagen');
         newerBottomButton.addEventListener("click", () => focusWeek(focusedWeekIndex - 1));
         olderTopButton.addEventListener("click", () => focusWeek(focusedWeekIndex + 1));
         olderBottomButton.addEventListener("click", () => focusWeek(focusedWeekIndex + 1));
+        personSelect.addEventListener("change", () => {
+            if (personSelect.value) {
+                loadPerson(personSelect.value);
+            }
+        });
 
         initializeTabs();
         updateNavigation();
         if (personSources.length > 0) {
-            statusElement.textContent = personSources.length + " persoon/personen beschikbaar";
+            statusElement.textContent = personSources.length + " persoon/personen met data";
             loadPerson(personSources[0].id);
         } else {
-            weeksScrollElement.innerHTML = "<div class=\"empty-state\">Geen personen beschikbaar.</div>";
-            statusElement.textContent = "Geen personen beschikbaar";
+            weeksScrollElement.innerHTML = "<div class=\"empty-state\">Geen personen met data.</div>";
+            statusElement.textContent = "Geen personen met data";
         }
     </script>
 </body>

@@ -52,6 +52,15 @@ $canAccessOverview = auth_can_access_page('overzicht');
         .btn-primary { background: var(--kvt-main-blue); border-color: var(--kvt-main-blue); color: #fff; }
         .panel { border: 1px solid var(--kvt-line); border-radius: 6px; padding: 12px; background: #fff; margin-top: 12px; }
         .range-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 100%; }
+        .person-row { margin-top: 12px; }
+        select.person-select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid var(--kvt-line);
+            border-radius: 4px;
+            font-size: 1rem;
+            background: #fff;
+        }
         label { display: block; font-size: 0.82rem; color: var(--kvt-muted); margin-bottom: 4px; }
         input[type="date"] { width: 100%; padding: 8px; border: 1px solid var(--kvt-line); border-radius: 4px; font-size: 1rem; }
         .users { display: grid; gap: 10px; }
@@ -118,6 +127,12 @@ $canAccessOverview = auth_can_access_page('overzicht');
                 <input type="date" id="end" value="<?= office_h($today->format('Y-m-d')) ?>">
             </div>
         </div>
+        <div class="person-row">
+            <label for="personSelect">Medewerker</label>
+            <select id="personSelect" class="person-select" disabled>
+                <option value="">Laden...</option>
+            </select>
+        </div>
         <div class="muted" id="rangeStatus" style="margin-top:10px;">Laden...</div>
     </div>
 
@@ -144,12 +159,15 @@ $canAccessOverview = auth_can_access_page('overzicht');
     var start = document.getElementById('start');
     var end = document.getElementById('end');
     var users = document.getElementById('users');
+    var personSelect = document.getElementById('personSelect');
     var rangeStatus = document.getElementById('rangeStatus');
     var pdfModal = document.getElementById('pdfModal');
     var pdfPreviewContent = document.getElementById('pdfPreviewContent');
     var pdfModalClose = document.getElementById('pdfModalClose');
     var pdfModalPrint = document.getElementById('pdfModalPrint');
     var reloadTimer = 0;
+    var currentRows = [];
+    var selectedEmail = '';
 
     function esc(value) {
         return String(value ?? '').replace(/[&<>"]/g, function (char) {
@@ -179,42 +197,67 @@ $canAccessOverview = auth_can_access_page('overzicht');
             });
     }
 
-    function renderRows(rows) {
+    function fillPersonSelect(rows) {
+        var previous = selectedEmail || personSelect.value;
+        personSelect.innerHTML = '';
         if (!rows.length) {
+            personSelect.disabled = true;
+            var empty = document.createElement('option');
+            empty.value = '';
+            empty.textContent = 'Geen medewerkers met data';
+            personSelect.appendChild(empty);
+            selectedEmail = '';
+            return;
+        }
+
+        personSelect.disabled = false;
+        rows.forEach(function (row) {
+            var option = document.createElement('option');
+            option.value = row.email;
+            option.textContent = row.name || row.email;
+            personSelect.appendChild(option);
+        });
+
+        var stillExists = rows.some(function (row) { return row.email === previous; });
+        selectedEmail = stillExists ? previous : rows[0].email;
+        personSelect.value = selectedEmail;
+    }
+
+    function renderSelected() {
+        if (!currentRows.length || !selectedEmail) {
             users.innerHTML = '<div class="panel empty">Geen gebruikersdata gevonden.</div>';
             return;
         }
 
-        users.innerHTML = rows.map(function (row) {
-            var warningHtml = row.warning
-                ? '<div class="warning">' + esc(row.warning) + '</div>'
-                : '';
-            return ''
-                + '<div class="user-card' + (row.missingDays.length ? ' warn' : '') + '">'
-                + '  <div class="row-head">'
-                + '    <div>'
-                + '      <div class="user-name">' + esc(row.name) + '</div>'
-                + '      <div class="user-email">' + esc(row.email) + '</div>'
-                + '    </div>'
-                + '    <div class="user-actions">'
-                + '      <button type="button" class="btn btn-primary js-pdf" data-email="' + esc(row.email) + '">PDF</button>'
-                + '    </div>'
-                + '  </div>'
-                + '  <div class="office-total">' + esc(row.officeDays) + ' kantoordagen</div>'
-                + warningHtml
-                + '</div>';
-        }).join('');
+        var row = currentRows.find(function (item) { return item.email === selectedEmail; }) || currentRows[0];
+        selectedEmail = row.email;
+        personSelect.value = selectedEmail;
 
-        Array.prototype.forEach.call(document.querySelectorAll('.js-pdf'), function (button) {
-            button.addEventListener('click', function () {
-                var email = button.getAttribute('data-email') || '';
-                var url = 'export_preview.php?fragment=1&mode=custom'
-                    + '&user=' + encodeURIComponent(email)
-                    + '&start=' + encodeURIComponent(start.value)
-                    + '&end=' + encodeURIComponent(end.value)
-                    + '&_ts=' + Date.now();
-                loadPreview(url);
-            });
+        var warningHtml = row.warning
+            ? '<div class="warning">' + esc(row.warning) + '</div>'
+            : '';
+        users.innerHTML = ''
+            + '<div class="user-card' + (row.missingDays.length ? ' warn' : '') + '">'
+            + '  <div class="row-head">'
+            + '    <div>'
+            + '      <div class="user-name">' + esc(row.name) + '</div>'
+            + '      <div class="user-email">' + esc(row.email) + '</div>'
+            + '    </div>'
+            + '    <div class="user-actions">'
+            + '      <button type="button" class="btn btn-primary" id="officePdfBtn">PDF</button>'
+            + '    </div>'
+            + '  </div>'
+            + '  <div class="office-total">' + esc(row.officeDays) + ' kantoordagen</div>'
+            + warningHtml
+            + '</div>';
+
+        document.getElementById('officePdfBtn').addEventListener('click', function () {
+            var url = 'export_preview.php?fragment=1&mode=custom'
+                + '&user=' + encodeURIComponent(row.email)
+                + '&start=' + encodeURIComponent(start.value)
+                + '&end=' + encodeURIComponent(end.value)
+                + '&_ts=' + Date.now();
+            loadPreview(url);
         });
     }
 
@@ -235,10 +278,14 @@ $canAccessOverview = auth_can_access_page('overzicht');
                 var startLabel = payload.startLabel || payload.start;
                 var endLabel = payload.endLabel || payload.end;
                 rangeStatus.textContent = 'Periode: ' + startLabel + ' t/m ' + endLabel;
-                renderRows(payload.rows || []);
+                currentRows = payload.rows || [];
+                fillPersonSelect(currentRows);
+                renderSelected();
             })
             .catch(function () {
                 rangeStatus.textContent = 'Laden mislukt.';
+                currentRows = [];
+                fillPersonSelect([]);
                 users.innerHTML = '<div class="panel empty">Laden mislukt.</div>';
             });
     }
@@ -252,6 +299,10 @@ $canAccessOverview = auth_can_access_page('overzicht');
     end.addEventListener('input', scheduleReload);
     start.addEventListener('change', scheduleReload);
     end.addEventListener('change', scheduleReload);
+    personSelect.addEventListener('change', function () {
+        selectedEmail = personSelect.value || '';
+        renderSelected();
+    });
 
     pdfModalClose.addEventListener('click', closePdfModal);
     pdfModalPrint.addEventListener('click', function () {

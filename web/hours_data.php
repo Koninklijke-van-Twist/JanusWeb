@@ -349,6 +349,71 @@ function hours_list_user_emails(): array
 }
 
 /**
+ * Load existing hours file without creating a new empty one.
+ *
+ * @return array<string, mixed>|null
+ */
+function hours_load_existing(string $email): ?array
+{
+    $email = strtolower(trim($email));
+    if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        return null;
+    }
+
+    $path = HOURS_CACHE_DIR . '/' . $email . '.json';
+    if (!is_file($path)) {
+        return null;
+    }
+
+    $raw = file_get_contents($path);
+    if ($raw === false || trim($raw) === '') {
+        return null;
+    }
+
+    $decoded = json_decode($raw, true);
+    if (!is_array($decoded)) {
+        return null;
+    }
+
+    $data = array_merge(hours_default_save_data('', $email), $decoded);
+    if (!is_array($data['MonthExtraTicks'] ?? null)) {
+        $data['MonthExtraTicks'] = [];
+    }
+    if (!is_array($data['SavedDays'] ?? null)) {
+        $data['SavedDays'] = [];
+    }
+
+    foreach ($data['SavedDays'] as $dayKey => $day) {
+        if (is_array($day)) {
+            $data['SavedDays'][$dayKey] = hours_enrich_day_data($day);
+        }
+    }
+
+    return $data;
+}
+
+/**
+ * Users that already have at least one saved day (no empty auto-created files).
+ *
+ * @return list<string>
+ */
+function hours_list_users_with_data(): array
+{
+    $emails = [];
+    foreach (hours_list_user_emails() as $email) {
+        $data = hours_load_existing($email);
+        if ($data === null) {
+            continue;
+        }
+        if (!empty($data['SavedDays']) && is_array($data['SavedDays'])) {
+            $emails[] = $email;
+        }
+    }
+
+    return $emails;
+}
+
+/**
  * @return array<string, mixed>
  */
 function hours_load(string $email, string $userName = ''): array

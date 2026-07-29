@@ -830,7 +830,7 @@ $headerDateLabel = janus_nl_date_ui($selectedDay);
                         <?= !empty($dayData['isHoliday']) ? 'disabled' : '' ?>>
                     <span>Ziek</span>
                 </label>
-                <button type="button" class="btn flag-btn" id="btnFutureVacation">Toekomstige Vakantie</button>
+                <button type="button" class="btn flag-btn" id="btnFutureVacation">Vakantieplanner</button>
             </div>
 
             <div class="km-row">
