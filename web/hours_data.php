@@ -229,6 +229,33 @@ function hours_day_exists(array $data, DateTimeInterface $date): bool
 }
 
 /**
+ * @param array<string, mixed> $data
+ */
+function hours_delete_day(array &$data, DateTimeInterface $date): void
+{
+    $key = hours_day_key($date);
+    if (isset($data['SavedDays'][$key])) {
+        unset($data['SavedDays'][$key]);
+    }
+}
+
+/**
+ * @return array<string, mixed>
+ */
+function hours_vacation_day_data(): array
+{
+    return hours_enrich_day_data([
+        'StartTime' => '00:00:00',
+        'EndTime' => '00:00:00',
+        'BreakMinutes' => 0,
+        'Kilometers' => 0.0,
+        'HomeWorkDriven' => false,
+        'isHoliday' => true,
+        'isSickDay' => false,
+    ]);
+}
+
+/**
  * First visit for a day: break=0, end = start + contract hours (WinForms LoadDay).
  *
  * @param array<string, mixed> $data

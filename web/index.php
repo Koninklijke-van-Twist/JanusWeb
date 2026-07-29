@@ -256,6 +256,19 @@ $extra = hours_calculate_extra_seconds($data, $selectedDay, false);
 $extraPrev = hours_calculate_extra_seconds($data, $selectedDay, true);
 $extraTotal = $extra + $extraPrev;
 
+$contractSeconds = hours_get_work_hours_seconds($data, hours_weekday_index($selectedDay));
+$selectedWorkedSeconds = hours_parse_timespan((string) ($dayData['WorkedTime'] ?? '00:00:00'));
+$selectedExtraContribution = 0;
+if (
+    ($contractSeconds > 0 || $selectedWorkedSeconds > 0)
+    && empty($dayData['isHoliday'])
+    && empty($dayData['isSickDay'])
+    && $selectedDay <= $today
+) {
+    $selectedExtraContribution = $selectedWorkedSeconds - $contractSeconds;
+}
+$extraBaseWithoutSelected = $extra - $selectedExtraContribution;
+
 // Persist refreshed MonthExtraTicks
 try {
     hours_save($email, $data);
@@ -279,8 +292,6 @@ $endValue = substr((string) $dayData['EndTime'], 0, 5);
 $headerText = janus_format_day_header($selectedDay, $dayData);
 
 $headerDateLabel = janus_nl_date_ui($selectedDay);
-
-$contractSeconds = hours_get_work_hours_seconds($data, hours_weekday_index($selectedDay));
 ?>
 <!DOCTYPE html>
 <html lang="nl">
@@ -430,6 +441,14 @@ $contractSeconds = hours_get_work_hours_seconds($data, hours_weekday_index($sele
         }
         .flag input { width: auto; }
         .flag span { font-weight: 700; font-size: 0.9rem; }
+        .flags .flag-btn {
+            width: 100%;
+            min-height: 42px;
+            justify-content: center;
+            font-weight: 700;
+            background: var(--janus-panel);
+            margin-bottom: 4px;
+        }
         .km-row {
             margin-top: 10px;
         }
@@ -621,6 +640,82 @@ $contractSeconds = hours_get_work_hours_seconds($data, hours_weekday_index($sele
             margin-top: 12px;
             justify-content: flex-end;
         }
+        .vacation-cal-card {
+            width: min(420px, 100%);
+        }
+        .vacation-cal-nav {
+            display: grid;
+            grid-template-columns: 44px 1fr 44px;
+            gap: 8px;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .vacation-cal-nav .month-label {
+            text-align: center;
+            font-weight: 700;
+            color: var(--kvt-perkins-blue);
+            text-transform: capitalize;
+        }
+        .vacation-cal-weekdays,
+        .vacation-cal-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 6px;
+        }
+        .vacation-cal-weekdays span {
+            text-align: center;
+            font-size: 0.75rem;
+            color: var(--kvt-muted);
+            font-weight: 700;
+        }
+        .vacation-cal-grid {
+            margin-top: 6px;
+        }
+        .vacation-cal-day {
+            appearance: none;
+            border: 1px solid var(--kvt-line);
+            background: #fff;
+            border-radius: 8px;
+            min-height: 44px;
+            padding: 4px;
+            font: inherit;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+        }
+        .vacation-cal-day.empty {
+            border: 0;
+            background: transparent;
+            cursor: default;
+            min-height: 44px;
+        }
+        .vacation-cal-day.today {
+            border-color: var(--kvt-main-blue);
+            box-shadow: inset 0 0 0 1px var(--kvt-main-blue);
+            color: var(--kvt-main-blue);
+        }
+        .vacation-cal-day.off {
+            background: #e8ebef;
+            color: #7a8794;
+            border-color: #d3d9e0;
+        }
+        .vacation-cal-day.holiday {
+            background: #e8f7ee;
+            border-color: #9fd6b0;
+            flex-direction: column;
+            gap: 1px;
+            line-height: 1.1;
+            font-size: 0.85rem;
+        }
+        .vacation-cal-day .palm {
+            font-size: 1rem;
+            line-height: 1;
+        }
+        .vacation-cal-day:not(.empty):hover {
+            border-color: var(--kvt-main-blue);
+        }
         @media (max-width: 420px) {
             .time-grid, .flags, .overtime { grid-template-columns: 1fr; }
             .week-day .hours, .week-day .delta { font-size: 0.68rem; }
@@ -735,6 +830,7 @@ $contractSeconds = hours_get_work_hours_seconds($data, hours_weekday_index($sele
                         <?= !empty($dayData['isHoliday']) ? 'disabled' : '' ?>>
                     <span>Ziek</span>
                 </label>
+                <button type="button" class="btn flag-btn" id="btnFutureVacation">Toekomstige Vakantie</button>
             </div>
 
             <div class="km-row">
@@ -760,12 +856,12 @@ $contractSeconds = hours_get_work_hours_seconds($data, hours_weekday_index($sele
             <div class="overtime">
                 <div class="overtime-meta">
                     <div class="muted">Overuren deze maand</div>
-                    <div class="<?= $extra > 0 ? 'plus' : ($extra < 0 ? 'minus' : 'zero') ?>"><?= janus_h(hours_format_extra_label($extra)) ?></div>
+                    <div id="overtimeMonth" class="<?= $extra > 0 ? 'plus' : ($extra < 0 ? 'minus' : 'zero') ?>"><?= janus_h(hours_format_extra_label($extra)) ?></div>
                     <div class="muted">vorige maand</div>
-                    <div class="<?= $extraPrev > 0 ? 'plus' : ($extraPrev < 0 ? 'minus' : 'zero') ?>"><?= janus_h(hours_format_extra_label($extraPrev)) ?></div>
+                    <div id="overtimePrev" class="<?= $extraPrev > 0 ? 'plus' : ($extraPrev < 0 ? 'minus' : 'zero') ?>"><?= janus_h(hours_format_extra_label($extraPrev)) ?></div>
                 </div>
                 <div class="overtime-total">
-                    <div class="total <?= $extraTotal > 0 ? 'plus' : ($extraTotal < 0 ? 'minus' : 'zero') ?>">
+                    <div id="overtimeTotal" class="total <?= $extraTotal > 0 ? 'plus' : ($extraTotal < 0 ? 'minus' : 'zero') ?>">
                         Totaal: <?= janus_h(hours_format_extra_label($extraTotal)) ?>
                     </div>
                 </div>
@@ -816,15 +912,38 @@ $contractSeconds = hours_get_work_hours_seconds($data, hours_weekday_index($sele
     </div>
 </div>
 
+<div class="range-modal" id="vacationModal" aria-hidden="true">
+    <div class="range-modal-card vacation-cal-card">
+        <h3 style="margin:0 0 10px;color:var(--kvt-perkins-blue)">Vakantieplanner</h3>
+        <div class="vacation-cal-nav">
+            <button type="button" class="btn" id="vacationPrevMonth" title="Vorige maand">←</button>
+            <div class="month-label" id="vacationMonthLabel">—</div>
+            <button type="button" class="btn" id="vacationNextMonth" title="Volgende maand">→</button>
+        </div>
+        <div class="vacation-cal-weekdays">
+            <span>Ma</span><span>Di</span><span>Wo</span><span>Do</span><span>Vr</span><span>Za</span><span>Zo</span>
+        </div>
+        <div class="vacation-cal-grid" id="vacationCalGrid"></div>
+        <div class="range-modal-actions">
+            <button type="button" class="btn" id="vacationModalClose">Sluiten</button>
+        </div>
+    </div>
+</div>
+
 <script>
 (function () {
     var contractSeconds = <?= (int) $contractSeconds ?>;
+    var overtimeBaseMonth = <?= (int) $extraBaseWithoutSelected ?>;
+    var overtimePrevSeconds = <?= (int) $extraPrev ?>;
     var start = document.getElementById('startTime');
     var end = document.getElementById('endTime');
     var brk = document.getElementById('breakMinutes');
     var holiday = document.getElementById('isHoliday');
     var sick = document.getElementById('isSickDay');
     var header = document.getElementById('dayHeader');
+    var overtimeMonthEl = document.getElementById('overtimeMonth');
+    var overtimePrevEl = document.getElementById('overtimePrev');
+    var overtimeTotalEl = document.getElementById('overtimeTotal');
     var dayPickerModal = document.getElementById('dayPickerModal');
     var dayPickerInput = document.getElementById('dayPickerInput');
     var dayPickerCancel = document.getElementById('dayPickerCancel');
@@ -863,22 +982,60 @@ $contractSeconds = hours_get_work_hours_seconds($data, hours_weekday_index($sele
             end.value = start.value;
         }
     }
+    function formatExtraLabel(seconds) {
+        var sign = seconds < 0 ? '-' : '+';
+        seconds = Math.abs(seconds);
+        var h = Math.floor(seconds / 3600);
+        var m = Math.floor((seconds % 3600) / 60);
+        return sign + pad(h) + ':' + pad(m);
+    }
+    function setOvertimeClass(el, seconds, keepTotal) {
+        var cls = seconds > 0 ? 'plus' : (seconds < 0 ? 'minus' : 'zero');
+        el.className = (keepTotal ? 'total ' : '') + cls;
+    }
+    function currentWorkedSeconds() {
+        if (holiday.checked || sick.checked) {
+            return 0;
+        }
+        var worked = parseHm(end.value) - parseHm(start.value) - ((parseInt(brk.value, 10) || 0) * 60);
+        return worked < 0 ? 0 : worked;
+    }
+    function updateOvertime() {
+        if (!overtimeMonthEl || !overtimeTotalEl) return;
+        var worked = currentWorkedSeconds();
+        var contribution = 0;
+        if (!holiday.checked && !sick.checked && (contractSeconds > 0 || worked > 0)) {
+            contribution = worked - contractSeconds;
+        }
+        var monthExtra = overtimeBaseMonth + contribution;
+        var totalExtra = monthExtra + overtimePrevSeconds;
+        overtimeMonthEl.textContent = formatExtraLabel(monthExtra);
+        setOvertimeClass(overtimeMonthEl, monthExtra, false);
+        if (overtimePrevEl) {
+            overtimePrevEl.textContent = formatExtraLabel(overtimePrevSeconds);
+            setOvertimeClass(overtimePrevEl, overtimePrevSeconds, false);
+        }
+        overtimeTotalEl.textContent = 'Totaal: ' + formatExtraLabel(totalExtra);
+        setOvertimeClass(overtimeTotalEl, totalExtra, true);
+    }
     function updateDayHeader() {
         var dateLabel = header.getAttribute('data-date-label') || '';
         if (holiday.checked) {
             header.textContent = dateLabel + ' - Vakantiedag';
+            updateOvertime();
             return;
         }
         if (sick.checked) {
             header.textContent = dateLabel + ' - Ziek';
+            updateOvertime();
             return;
         }
-        var worked = parseHm(end.value) - parseHm(start.value) - ((parseInt(brk.value, 10) || 0) * 60);
-        if (worked < 0) worked = 0;
+        var worked = currentWorkedSeconds();
         var h = Math.floor(worked / 3600);
         var m = Math.floor((worked % 3600) / 60);
         var minuteLabel = m === 1 ? 'minuut' : 'minuten';
         header.textContent = dateLabel + ' - ' + h + ' uur, ' + m + ' ' + minuteLabel + ' gewerkt';
+        updateOvertime();
     }
     function applySpecialDayState() {
         var disabled = holiday.checked || sick.checked;
@@ -959,11 +1116,19 @@ $contractSeconds = hours_get_work_hours_seconds($data, hours_weekday_index($sele
     });
 
     start.addEventListener('input', function () {
+        updateDayHeader();
+        scheduleAutosave();
+    });
+    start.addEventListener('blur', function () {
         ensureEndAfterStart();
         updateDayHeader();
         scheduleAutosave();
     });
     end.addEventListener('input', function () {
+        updateDayHeader();
+        scheduleAutosave();
+    });
+    end.addEventListener('blur', function () {
         ensureEndAfterStart();
         updateDayHeader();
         scheduleAutosave();
@@ -1122,6 +1287,134 @@ $contractSeconds = hours_get_work_hours_seconds($data, hours_weekday_index($sele
             closeRangeModal();
         }
     });
+    var vacationModal = document.getElementById('vacationModal');
+    var vacationCalGrid = document.getElementById('vacationCalGrid');
+    var vacationMonthLabel = document.getElementById('vacationMonthLabel');
+    var vacationPrevMonth = document.getElementById('vacationPrevMonth');
+    var vacationNextMonth = document.getElementById('vacationNextMonth');
+    var vacationModalClose = document.getElementById('vacationModalClose');
+    var vacationToggleBusy = false;
+    var vacationView = (function () {
+        var parts = todayIso.split('-');
+        return {
+            year: parseInt(parts[0], 10) || new Date().getFullYear(),
+            month: parseInt(parts[1], 10) || (new Date().getMonth() + 1)
+        };
+    })();
+
+    var vacationDirty = false;
+
+    function closeVacationModal() {
+        vacationModal.classList.remove('open');
+        vacationModal.setAttribute('aria-hidden', 'true');
+        if (vacationDirty) {
+            var selectedDay = document.querySelector('#dayForm input[name="day"]').value || todayIso;
+            window.location.href = 'index.php?day=' + encodeURIComponent(selectedDay);
+        }
+    }
+
+    function openVacationModal() {
+        vacationDirty = false;
+        vacationModal.classList.add('open');
+        vacationModal.setAttribute('aria-hidden', 'false');
+        loadVacationMonth();
+    }
+
+    function shiftVacationMonth(delta) {
+        vacationView.month += delta;
+        if (vacationView.month < 1) {
+            vacationView.month = 12;
+            vacationView.year -= 1;
+        } else if (vacationView.month > 12) {
+            vacationView.month = 1;
+            vacationView.year += 1;
+        }
+        loadVacationMonth();
+    }
+
+    function renderVacationMonth(payload) {
+        vacationMonthLabel.textContent = payload.label || (payload.month + '-' + payload.year);
+        var html = '';
+        var start = parseInt(payload.startWeekday, 10) || 0;
+        for (var i = 0; i < start; i++) {
+            html += '<div class="vacation-cal-day empty"></div>';
+        }
+        (payload.days || []).forEach(function (day) {
+            var classes = ['vacation-cal-day'];
+            if (day.today) classes.push('today');
+            if (day.off) classes.push('off');
+            if (day.holiday) classes.push('holiday');
+            var title = day.off ? ' title="Je werkt op deze dag niet"' : '';
+            var label = day.holiday
+                ? '<span class="palm">🌴</span><span>' + String(day.day) + '</span>'
+                : String(day.day);
+            html += '<button type="button" class="' + classes.join(' ') + '"'
+                + ' data-iso="' + day.iso + '"'
+                + ' data-holiday="' + (day.holiday ? '1' : '0') + '"'
+                + title + '>' + label + '</button>';
+        });
+        vacationCalGrid.innerHTML = html;
+        Array.prototype.forEach.call(vacationCalGrid.querySelectorAll('.vacation-cal-day:not(.empty)'), function (btn) {
+            btn.addEventListener('click', function () {
+                toggleVacationDay(btn);
+            });
+        });
+    }
+
+    function loadVacationMonth() {
+        vacationCalGrid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:16px;color:var(--kvt-muted)">Laden...</div>';
+        fetch('hours_vacation.php?year=' + encodeURIComponent(vacationView.year)
+            + '&month=' + encodeURIComponent(vacationView.month)
+            + '&_ts=' + Date.now(), { cache: 'no-store' })
+            .then(function (resp) { return resp.json(); })
+            .then(function (payload) {
+                if (!payload || !payload.ok) throw new Error('invalid');
+                vacationView.year = payload.year;
+                vacationView.month = payload.month;
+                renderVacationMonth(payload);
+            })
+            .catch(function () {
+                vacationCalGrid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:16px;color:#b42318">Laden mislukt.</div>';
+            });
+    }
+
+    function toggleVacationDay(btn) {
+        if (vacationToggleBusy) return;
+        var iso = btn.getAttribute('data-iso') || '';
+        var currentlyHoliday = btn.getAttribute('data-holiday') === '1';
+        var enable = !currentlyHoliday;
+        vacationToggleBusy = true;
+        var form = new FormData();
+        form.append('day', iso);
+        if (enable) form.append('holiday', '1');
+        fetch('hours_vacation.php', { method: 'POST', body: form, cache: 'no-store' })
+            .then(function (resp) { return resp.json(); })
+            .then(function (payload) {
+                vacationToggleBusy = false;
+                if (!payload || !payload.ok) throw new Error('invalid');
+                vacationDirty = true;
+                var selectedDay = document.querySelector('#dayForm input[name="day"]').value || '';
+                if (selectedDay === iso) {
+                    window.location.href = 'index.php?day=' + encodeURIComponent(iso);
+                    return;
+                }
+                loadVacationMonth();
+            })
+            .catch(function () {
+                vacationToggleBusy = false;
+                setAutosaveStatus('Opslaan mislukt', '#b42318');
+            });
+    }
+
+    document.getElementById('btnFutureVacation').addEventListener('click', openVacationModal);
+    vacationPrevMonth.addEventListener('click', function () { shiftVacationMonth(-1); });
+    vacationNextMonth.addEventListener('click', function () { shiftVacationMonth(1); });
+    vacationModalClose.addEventListener('click', closeVacationModal);
+    vacationModal.addEventListener('click', function (e) {
+        if (e.target === vacationModal) {
+            closeVacationModal();
+        }
+    });
     dayPickerModal.addEventListener('click', function (e) {
         if (e.target === dayPickerModal) {
             closeDayPickerModal();
@@ -1136,6 +1429,9 @@ $contractSeconds = hours_get_work_hours_seconds($data, hours_weekday_index($sele
         }
         if (e.key === 'Escape' && dayPickerModal.classList.contains('open')) {
             closeDayPickerModal();
+        }
+        if (e.key === 'Escape' && vacationModal.classList.contains('open')) {
+            closeVacationModal();
         }
     });
     applySpecialDayState();
