@@ -1,0 +1,43 @@
+---
+description: Janus projectconventies voor architectuur, data en UI
+alwaysApply: true
+---
+
+# Janus projectregels
+
+## Scope en architectuur
+- Deze applicatie draait volledig vanuit de map `web/`.
+- Houd links relatief (`index.php`, `settings.php`, `export.php`).
+- De app is mobile-first. Nieuwe UI-wijzigingen moeten eerst op telefoonscherm goed leesbaar zijn.
+- Janus is de web-port van de WinForms urenregistratie; UI-structuur en features volgen die desktopversie tenzij expliciet anders gevraagd.
+
+## Niet wijzigen
+- Bestand `web/logincheck.php` niet aanpassen.
+- Bestand `web/odata.php` niet aanpassen (gedeelde infra; Janus gebruikt OData momenteel niet in de hoofdflow).
+- Bestand `web/auth.php` alleen aanpassen na expliciete gebruikersvraag.
+
+## Data en logica
+- Hoofdflow staat in `web/index.php`.
+- Uren-data altijd via functies in `web/hours_data.php` laden/opslaan.
+- Opslagpad: `web/cache/hours/{email}.json` (geen vrije opslaglocatie zoals in WinForms).
+- JSON-structuur moet identiek blijven aan WinForms `savedata.json` (PascalCase velden, `dd-MM-yyyy` / `MM-yyyy` keys, TimeSpan als `HH:mm:ss`, `MonthExtraTicks` in .NET ticks).
+- PDF-export via `web/export.php` + `web/hours_pdf.php`; layout en regels spiegelen WinForms `CreatePDF`.
+
+## UI-regels
+- Geen zware frameworks introduceren zonder expliciet verzoek.
+- Gebruik bestaande favicon/manifest-bestanden op elke HTML-pagina.
+- Gebruik op de hoofdpagina altijd `logo-website.png`.
+- Behoud de WinForms-schermindeling: dag-navigatie, tijden/pauzes/shortcuts, Kantoor/Vakantie/Ziek, weekstrook, overuren, PDF + instellingen.
+
+## Veiligheid en kwaliteit
+- Vang I/O-fouten af en toon een korte gebruikersvriendelijke melding.
+- Schrijf urenbestanden atomisch (temp + rename).
+
+## Code-structuur (PHP)
+- Sectievolgorde waar van toepassing: Includes/requires → Constants → Functies → Page load
+- Geen lege secties toevoegen.
+- Classes in een eigen bestand (maximaal 1 class per bestand).
+
+## Werkwijze voor de agent
+- Houd wijzigingen klein en gericht; pas geen ongerelateerde code aan.
+- Volg bestaande conventies in omliggende code voordat je nieuwe patronen introduceert.
