@@ -69,7 +69,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     $data['KilometerHomeWork'] = max(0, (float) str_replace(',', '.', (string) ($_POST['KilometerHomeWork'] ?? 0)));
-    $data['DefaultOfficeDays'] = hours_default_office_days_from_post($_POST);
+    hours_set_default_office_days_from(
+        $data,
+        hours_default_office_days_from_post($_POST),
+        new DateTimeImmutable('today')
+    );
     $data['UserName'] = $userName;
     $data['UserEmail'] = $email;
 

@@ -42,10 +42,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'setup') {
     $existing = hours_load_existing($email);
     if ($existing !== null) {
         $data = $existing;
+        hours_ensure_default_office_history($data);
+        // First-time light setup: apply chosen defaults for all dates (initial schedule).
+        $data['DefaultOfficeDays'] = $defaults;
+        $data['DefaultOfficeDaysHistory'] = [
+            ['From' => '1970-01-01', 'Days' => $defaults],
+        ];
     } else {
         $data = hours_default_save_data($userName, $email);
+        $data['DefaultOfficeDays'] = $defaults;
+        $data['DefaultOfficeDaysHistory'] = [
+            ['From' => '1970-01-01', 'Days' => $defaults],
+        ];
     }
-    $data['DefaultOfficeDays'] = $defaults;
     $data['UserName'] = hours_resolve_user_name($data, $email);
     $data['UserEmail'] = $email;
 
@@ -80,7 +89,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     $first = new DateTimeImmutable(sprintf('%04d-%02d-01', $year, $month));
     $daysInMonth = (int) $first->format('t');
     $startWeekday = hours_weekday_index($first);
-    $defaultDays = hours_get_default_office_days($data);
+    $currentDefaults = hours_get_default_office_days($data);
 
     $days = [];
     for ($d = 1; $d <= $daysInMonth; $d++) {
@@ -88,13 +97,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         $weekday = hours_weekday_index($date);
         $manual = hours_day_exists($data, $date);
         $office = hours_is_effective_office_day($data, $date);
+        $defaultForDate = hours_default_office_for_date($data, $date);
         $days[] = [
             'day' => $d,
             'iso' => $date->format('Y-m-d'),
             'weekday' => $weekday,
             'office' => $office,
             'manual' => $manual,
-            'off' => !$defaultDays[$weekday],
+            'off' => !$defaultForDate,
             'today' => $date->format('Y-m-d') === $today->format('Y-m-d'),
         ];
     }
@@ -105,7 +115,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         'month' => $month,
         'label' => janus_nl_month_abbrev($month) . ' ' . $year,
         'startWeekday' => $startWeekday,
-        'DefaultOfficeDays' => $defaultDays,
+        'DefaultOfficeDays' => $currentDefaults,
         'days' => $days,
     ]);
 }
@@ -118,7 +128,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $enable = !empty($_POST['office']);
     $key = hours_day_key($day);
-    $defaultOffice = hours_default_office_for_weekday($data, hours_weekday_index($day));
+    $defaultOffice = hours_default_office_for_date($data, $day);
 
     if ($enable === $defaultOffice) {
         // Follow weekday default again: remove light stubs, else set flag to match.

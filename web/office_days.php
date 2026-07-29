@@ -50,10 +50,16 @@ $canAccessOverview = auth_can_access_page('overzicht');
             border-radius: 4px; padding: 8px 10px; font-size: 0.9rem; cursor: pointer; text-decoration: none;
         }
         .btn-primary { background: var(--kvt-main-blue); border-color: var(--kvt-main-blue); color: #fff; }
+        .btn-excel { background: #15803d; border-color: #15803d; color: #fff; }
+        .btn-excel:disabled { opacity: 0.55; cursor: default; }
         .panel { border: 1px solid var(--kvt-line); border-radius: 6px; padding: 12px; background: #fff; margin-top: 12px; }
         .range-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 100%; }
+        .range-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; margin-top: 10px; }
         label { display: block; font-size: 0.82rem; color: var(--kvt-muted); margin-bottom: 4px; }
-        input[type="date"] { width: 100%; padding: 8px; border: 1px solid var(--kvt-line); border-radius: 4px; font-size: 1rem; }
+        input[type="date"], input[type="search"] {
+            width: 100%; padding: 8px; border: 1px solid var(--kvt-line); border-radius: 4px; font-size: 1rem;
+        }
+        .search-row { margin-top: 12px; }
         .users { display: grid; gap: 10px; margin-top: 12px; }
         .user-card { border: 1px solid var(--kvt-line); border-radius: 6px; padding: 12px; background: #fff; }
         .user-card.warn { animation: officeWarn 1s linear infinite alternate; border-color: #f59e0b; }
@@ -134,7 +140,15 @@ $canAccessOverview = auth_can_access_page('overzicht');
                 <input type="date" id="end" value="<?= office_h($today->format('Y-m-d')) ?>">
             </div>
         </div>
-        <div class="muted" id="rangeStatus" style="margin-top:10px;">Laden...</div>
+        <div class="range-actions">
+            <div class="muted" id="rangeStatus">Laden...</div>
+            <button type="button" class="btn btn-excel" id="excelExport">Excel Export</button>
+        </div>
+    </div>
+
+    <div class="search-row panel" style="margin-top:12px;padding:10px 12px;">
+        <label for="userSearch">Zoeken</label>
+        <input type="search" id="userSearch" placeholder="Naam of e-mail…" autocomplete="off">
     </div>
 
     <div class="users" id="users"></div>
@@ -165,7 +179,10 @@ $canAccessOverview = auth_can_access_page('overzicht');
     var pdfPreviewContent = document.getElementById('pdfPreviewContent');
     var pdfModalClose = document.getElementById('pdfModalClose');
     var pdfModalPrint = document.getElementById('pdfModalPrint');
+    var excelExport = document.getElementById('excelExport');
+    var userSearch = document.getElementById('userSearch');
     var reloadTimer = 0;
+    var allRows = [];
 
     function esc(value) {
         return String(value ?? '').replace(/[&<>"]/g, function (char) {
@@ -215,9 +232,23 @@ $canAccessOverview = auth_can_access_page('overzicht');
             + '</div>';
     }
 
+    function filterRows(rows) {
+        var q = (userSearch.value || '').trim().toLowerCase();
+        if (!q) return rows.slice();
+        return rows.filter(function (row) {
+            var name = String(row.name || '').toLowerCase();
+            var email = String(row.email || '').toLowerCase();
+            return name.indexOf(q) !== -1 || email.indexOf(q) !== -1;
+        });
+    }
+
     function renderRows(rows) {
         if (!rows.length) {
-            users.innerHTML = '<div class="panel empty">Geen gebruikersdata gevonden.</div>';
+            users.innerHTML = '<div class="panel empty">'
+                + (allRows.length && (userSearch.value || '').trim()
+                    ? 'Geen resultaten voor deze zoekopdracht.'
+                    : 'Geen gebruikersdata gevonden.')
+                + '</div>';
             return;
         }
 
@@ -245,6 +276,10 @@ $canAccessOverview = auth_can_access_page('overzicht');
         });
     }
 
+    function renderFiltered() {
+        renderRows(filterRows(allRows));
+    }
+
     function reload() {
         if (!start.value || !end.value) return;
         if (end.value < start.value) {
@@ -262,10 +297,12 @@ $canAccessOverview = auth_can_access_page('overzicht');
                 var startLabel = payload.startLabel || payload.start;
                 var endLabel = payload.endLabel || payload.end;
                 rangeStatus.textContent = 'Periode: ' + startLabel + ' t/m ' + endLabel;
-                renderRows(payload.rows || []);
+                allRows = payload.rows || [];
+                renderFiltered();
             })
             .catch(function () {
                 rangeStatus.textContent = 'Laden mislukt.';
+                allRows = [];
                 users.innerHTML = '<div class="panel empty">Laden mislukt.</div>';
             });
     }
@@ -279,6 +316,15 @@ $canAccessOverview = auth_can_access_page('overzicht');
     end.addEventListener('input', scheduleReload);
     start.addEventListener('change', scheduleReload);
     end.addEventListener('change', scheduleReload);
+    userSearch.addEventListener('input', renderFiltered);
+
+    excelExport.addEventListener('click', function () {
+        if (!start.value || !end.value) return;
+        var url = 'office_days_excel.php?start=' + encodeURIComponent(start.value)
+            + '&end=' + encodeURIComponent(end.value)
+            + '&_ts=' + Date.now();
+        window.location.href = url;
+    });
 
     pdfModalClose.addEventListener('click', closePdfModal);
     pdfModalPrint.addEventListener('click', function () {

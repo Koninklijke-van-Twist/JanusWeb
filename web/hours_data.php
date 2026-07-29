@@ -35,7 +35,7 @@ function hours_default_save_data(string $userName = '', string $userEmail = ''):
         'SaturdayHours' => '00:00:00',
         'SundayHours' => '00:00:00',
         'KilometerHomeWork' => 0.0,
-        // Mon..Sun — used for days without an explicit SavedDays override
+        // Mon..Sun — current defaults (from today onward; history covers the past)
         'DefaultOfficeDays' => [true, true, true, true, true, false, false],
         'MonthExtraTicks' => [],
         'SavedDays' => [],
@@ -266,12 +266,139 @@ function hours_normalize_default_office_days(mixed $value): array
 }
 
 /**
+ * @param mixed $history
+ * @return list<array{From: string, Days: list<bool>}>
+ */
+function hours_normalize_default_office_history(mixed $history, ?array $fallbackDays = null): array
+{
+    $fallbackDays = hours_normalize_default_office_days($fallbackDays);
+    if (!is_array($history) || $history === []) {
+        return [['From' => '1970-01-01', 'Days' => $fallbackDays]];
+    }
+
+    $out = [];
+    foreach ($history as $entry) {
+        if (!is_array($entry)) {
+            continue;
+        }
+        $from = trim((string) ($entry['From'] ?? ''));
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $from) !== 1) {
+            continue;
+        }
+        $out[] = [
+            'From' => $from,
+            'Days' => hours_normalize_default_office_days($entry['Days'] ?? null),
+        ];
+    }
+
+    if ($out === []) {
+        return [['From' => '1970-01-01', 'Days' => $fallbackDays]];
+    }
+
+    usort($out, static function (array $a, array $b): int {
+        return strcmp($a['From'], $b['From']);
+    });
+
+    return $out;
+}
+
+/**
+ * Ensure history exists; seed from current DefaultOfficeDays when missing.
+ *
+ * @param array<string, mixed> $data
+ */
+function hours_ensure_default_office_history(array &$data): void
+{
+    $current = hours_normalize_default_office_days($data['DefaultOfficeDays'] ?? null);
+    $data['DefaultOfficeDays'] = $current;
+
+    if (!isset($data['DefaultOfficeDaysHistory']) || !is_array($data['DefaultOfficeDaysHistory']) || $data['DefaultOfficeDaysHistory'] === []) {
+        $data['DefaultOfficeDaysHistory'] = [
+            ['From' => '1970-01-01', 'Days' => $current],
+        ];
+
+        return;
+    }
+
+    $data['DefaultOfficeDaysHistory'] = hours_normalize_default_office_history(
+        $data['DefaultOfficeDaysHistory'],
+        $current
+    );
+
+    // Keep current mirror in sync with latest history entry.
+    $history = $data['DefaultOfficeDaysHistory'];
+    $latest = $history[count($history) - 1];
+    $data['DefaultOfficeDays'] = $latest['Days'];
+}
+
+/**
  * @param array<string, mixed> $data
  * @return list<bool>
  */
 function hours_get_default_office_days(array $data): array
 {
     return hours_normalize_default_office_days($data['DefaultOfficeDays'] ?? null);
+}
+
+/**
+ * Defaults that were in force on a specific calendar date.
+ *
+ * @param array<string, mixed> $data
+ * @return list<bool>
+ */
+function hours_get_default_office_days_on(array $data, DateTimeInterface $date): array
+{
+    $iso = DateTimeImmutable::createFromInterface($date)->format('Y-m-d');
+    $history = hours_normalize_default_office_history(
+        $data['DefaultOfficeDaysHistory'] ?? null,
+        $data['DefaultOfficeDays'] ?? null
+    );
+
+    $chosen = $history[0]['Days'];
+    foreach ($history as $entry) {
+        if ($entry['From'] <= $iso) {
+            $chosen = $entry['Days'];
+        } else {
+            break;
+        }
+    }
+
+    return $chosen;
+}
+
+/**
+ * Apply new weekday defaults starting today. Past days keep earlier history entries.
+ *
+ * @param array<string, mixed> $data
+ * @param list<bool> $days
+ */
+function hours_set_default_office_days_from(array &$data, array $days, DateTimeInterface $from): void
+{
+    hours_ensure_default_office_history($data);
+    $days = hours_normalize_default_office_days($days);
+    $fromIso = DateTimeImmutable::createFromInterface($from)->format('Y-m-d');
+    $history = $data['DefaultOfficeDaysHistory'];
+    $current = hours_get_default_office_days($data);
+
+    if ($current === $days) {
+        $data['DefaultOfficeDays'] = $days;
+        return;
+    }
+
+    $replaced = false;
+    for ($i = count($history) - 1; $i >= 0; $i--) {
+        if ($history[$i]['From'] === $fromIso) {
+            $history[$i]['Days'] = $days;
+            $replaced = true;
+            break;
+        }
+    }
+    if (!$replaced) {
+        $history[] = ['From' => $fromIso, 'Days' => $days];
+    }
+
+    $data['DefaultOfficeDaysHistory'] = hours_normalize_default_office_history($history, $days);
+    $data['DefaultOfficeDays'] = $days;
 }
 
 /**
@@ -286,7 +413,18 @@ function hours_default_office_for_weekday(array $data, int $weekdayIndex): bool
 }
 
 /**
- * Effective office day: explicit SavedDay wins, otherwise weekday default.
+ * @param array<string, mixed> $data
+ */
+function hours_default_office_for_date(array $data, DateTimeInterface $date): bool
+{
+    $days = hours_get_default_office_days_on($data, $date);
+    $weekdayIndex = hours_weekday_index($date);
+
+    return !empty($days[$weekdayIndex]);
+}
+
+/**
+ * Effective office day: explicit SavedDay wins, otherwise weekday default for that date.
  *
  * @param array<string, mixed> $data
  */
@@ -301,7 +439,7 @@ function hours_is_effective_office_day(array $data, DateTimeInterface $date): bo
         return !empty($row['HomeWorkDriven']);
     }
 
-    return hours_default_office_for_weekday($data, hours_weekday_index($date));
+    return hours_default_office_for_date($data, $date);
 }
 
 /**
@@ -420,7 +558,7 @@ function hours_ensure_day_initialized(array &$data, DateTimeInterface $date): ar
         $start = hours_parse_timespan((string) $day['StartTime']);
         $day['BreakMinutes'] = 0;
         $day['EndTime'] = hours_format_timespan_from_seconds($start + $contract);
-        $day['HomeWorkDriven'] = hours_default_office_for_weekday($data, $dayNumber);
+        $day['HomeWorkDriven'] = hours_default_office_for_date($data, $date);
         $day = hours_enrich_day_data($day);
         $data['SavedDays'][hours_day_key($date)] = $day;
     }
@@ -531,6 +669,7 @@ function hours_load_existing(string $email): ?array
         $data['SavedDays'] = [];
     }
     $data['DefaultOfficeDays'] = hours_normalize_default_office_days($data['DefaultOfficeDays'] ?? null);
+    hours_ensure_default_office_history($data);
 
     foreach ($data['SavedDays'] as $dayKey => $day) {
         if (is_array($day)) {
@@ -609,6 +748,7 @@ function hours_load(string $email, string $userName = ''): array
         $data['SavedDays'] = [];
     }
     $data['DefaultOfficeDays'] = hours_normalize_default_office_days($data['DefaultOfficeDays'] ?? null);
+    hours_ensure_default_office_history($data);
 
     if ($userName !== '' && trim((string) ($data['UserName'] ?? '')) === '') {
         $data['UserName'] = $userName;
