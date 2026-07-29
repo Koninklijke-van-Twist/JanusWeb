@@ -5,6 +5,7 @@ error_reporting(E_ALL);
 
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/logincheck.php';
+require_once __DIR__ . '/localization.php';
 require_once __DIR__ . '/hours_data.php';
 
 function overview_h(?string $value): string
@@ -22,6 +23,9 @@ auth_require_page_access('overzicht');
 
 $persons = [];
 foreach (hours_list_users_with_data() as $email) {
+    if (janus_is_light_mode($email)) {
+        continue;
+    }
     $data = hours_load_existing($email);
     if ($data === null) {
         continue;

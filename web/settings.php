@@ -47,33 +47,67 @@ if ($email === '') {
 }
 
 $userName = hours_current_user_name();
-$data = hours_load($email, $userName);
+$isLightMode = janus_is_light_mode($email);
+$needsSetup = janus_needs_light_setup($email);
+
+if ($needsSetup) {
+    $data = hours_default_save_data($userName, $email);
+} else {
+    $data = hours_load($email, $userName);
+}
 $userName = hours_resolve_user_name($data, $email);
 $dayParam = trim((string) ($_GET['day'] ?? $_POST['day'] ?? ''));
 $message = '';
 $error = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $data['MondayHours'] = janus_input_to_timespan((string) ($_POST['MondayHours'] ?? '08:00'));
-    $data['TuesdayHours'] = janus_input_to_timespan((string) ($_POST['TuesdayHours'] ?? '08:00'));
-    $data['WednesdayHours'] = janus_input_to_timespan((string) ($_POST['WednesdayHours'] ?? '08:00'));
-    $data['ThursdayHours'] = janus_input_to_timespan((string) ($_POST['ThursdayHours'] ?? '08:00'));
-    $data['FridayHours'] = janus_input_to_timespan((string) ($_POST['FridayHours'] ?? '08:00'));
-    $data['SaturdayHours'] = janus_input_to_timespan((string) ($_POST['SaturdayHours'] ?? '00:00'));
-    $data['SundayHours'] = janus_input_to_timespan((string) ($_POST['SundayHours'] ?? '00:00'));
+    $action = (string) ($_POST['action'] ?? 'save');
+    if ($action === 'enable_light') {
+        janus_set_light_mode($email, true);
+        header('Location: index.php');
+        exit;
+    }
+
     $data['KilometerHomeWork'] = max(0, (float) str_replace(',', '.', (string) ($_POST['KilometerHomeWork'] ?? 0)));
+    $data['DefaultOfficeDays'] = hours_default_office_days_from_post($_POST);
     $data['UserName'] = $userName;
     $data['UserEmail'] = $email;
 
+    if (!$isLightMode) {
+        $data['MondayHours'] = janus_input_to_timespan((string) ($_POST['MondayHours'] ?? '08:00'));
+        $data['TuesdayHours'] = janus_input_to_timespan((string) ($_POST['TuesdayHours'] ?? '08:00'));
+        $data['WednesdayHours'] = janus_input_to_timespan((string) ($_POST['WednesdayHours'] ?? '08:00'));
+        $data['ThursdayHours'] = janus_input_to_timespan((string) ($_POST['ThursdayHours'] ?? '08:00'));
+        $data['FridayHours'] = janus_input_to_timespan((string) ($_POST['FridayHours'] ?? '08:00'));
+        $data['SaturdayHours'] = janus_input_to_timespan((string) ($_POST['SaturdayHours'] ?? '00:00'));
+        $data['SundayHours'] = janus_input_to_timespan((string) ($_POST['SundayHours'] ?? '00:00'));
+    }
+
     try {
         hours_save($email, $data);
+        if ($isLightMode) {
+            janus_set_light_setup_done($email, true);
+        }
         $message = 'Instellingen opgeslagen.';
+        $needsSetup = false;
     } catch (Throwable $e) {
         $error = 'Opslaan mislukt.';
     }
+    $isLightMode = janus_is_light_mode($email);
 }
 
 $km = (float) ($data['KilometerHomeWork'] ?? 0);
+$defaultOffice = hours_get_default_office_days($data);
+$officeLabels = ['Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za', 'Zo'];
+$officeNames = [
+    'DefaultOfficeMon',
+    'DefaultOfficeTue',
+    'DefaultOfficeWed',
+    'DefaultOfficeThu',
+    'DefaultOfficeFri',
+    'DefaultOfficeSat',
+    'DefaultOfficeSun',
+];
 $backUrl = 'index.php' . ($dayParam !== '' ? ('?day=' . rawurlencode($dayParam)) : '');
 ?>
 <!DOCTYPE html>
@@ -113,6 +147,28 @@ $backUrl = 'index.php' . ($dayParam !== '' ? ('?day=' . rawurlencode($dayParam))
             grid-template-columns: 1fr 1fr;
             gap: 0 10px;
         }
+        .office-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 6px;
+            margin-top: 8px;
+        }
+        .office-day {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 4px;
+            border: 1px solid var(--kvt-line);
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: var(--kvt-text);
+            background: #fff;
+            cursor: pointer;
+            user-select: none;
+        }
+        .office-day input { margin: 0; }
         .btn, a.btn {
             appearance: none;
             border: 1px solid var(--kvt-line);
@@ -137,6 +193,7 @@ $backUrl = 'index.php' . ($dayParam !== '' ? ('?day=' . rawurlencode($dayParam))
         .flash-err { background: #fdecec; color: #b42318; }
         .hint { font-size: 0.85rem; color: var(--kvt-muted); margin-top: -4px; margin-bottom: 10px; }
         code { font-size: 0.8rem; }
+        .btn-secondary { width: 100%; margin-bottom: 8px; }
     </style>
 </head>
 <body>
@@ -161,42 +218,62 @@ $backUrl = 'index.php' . ($dayParam !== '' ? ('?day=' . rawurlencode($dayParam))
         </div>
 
         <div class="panel">
-            <strong>Werkuren per week</strong>
-            <div class="week-grid" style="margin-top:10px">
-                <?php
-                $days = [
-                    'MondayHours' => 'Maandag',
-                    'TuesdayHours' => 'Dinsdag',
-                    'WednesdayHours' => 'Woensdag',
-                    'ThursdayHours' => 'Donderdag',
-                    'FridayHours' => 'Vrijdag',
-                    'SaturdayHours' => 'Zaterdag',
-                    'SundayHours' => 'Zondag',
-                ];
-                foreach ($days as $key => $label):
-                ?>
-                    <div>
-                        <label for="<?= janus_h($key) ?>"><?= janus_h($label) ?></label>
-                        <input type="time" id="<?= janus_h($key) ?>" name="<?= janus_h($key) ?>"
-                               value="<?= janus_h(janus_timespan_to_input((string) ($data[$key] ?? '00:00:00'))) ?>">
-                    </div>
+            <strong>Standaard kantoordagen</strong>
+            <div class="office-grid">
+                <?php foreach ($officeNames as $i => $name): ?>
+                    <label class="office-day">
+                        <span><?= janus_h($officeLabels[$i]) ?></span>
+                        <input type="checkbox" name="<?= janus_h($name) ?>" value="1" <?= !empty($defaultOffice[$i]) ? 'checked' : '' ?>>
+                    </label>
                 <?php endforeach; ?>
             </div>
         </div>
 
-        <div class="panel">
-            <strong>Opslaglocatie</strong>
-            <p class="hint" style="margin-top:8px">
-                Webopslag (vast): <code>web/cache/hours/<?= janus_h($email) ?>.json</code><br>
-                Compatibel met WinForms <code>savedata.json</code> (zelfde JSON-structuur).
-            </p>
-        </div>
+        <?php if (!$isLightMode): ?>
+            <div class="panel">
+                <strong>Werkuren per week</strong>
+                <div class="week-grid" style="margin-top:10px">
+                    <?php
+                    $days = [
+                        'MondayHours' => 'Maandag',
+                        'TuesdayHours' => 'Dinsdag',
+                        'WednesdayHours' => 'Woensdag',
+                        'ThursdayHours' => 'Donderdag',
+                        'FridayHours' => 'Vrijdag',
+                        'SaturdayHours' => 'Zaterdag',
+                        'SundayHours' => 'Zondag',
+                    ];
+                    foreach ($days as $key => $label):
+                    ?>
+                        <div>
+                            <label for="<?= janus_h($key) ?>"><?= janus_h($label) ?></label>
+                            <input type="time" id="<?= janus_h($key) ?>" name="<?= janus_h($key) ?>"
+                                   value="<?= janus_h(janus_timespan_to_input((string) ($data[$key] ?? '00:00:00'))) ?>">
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+        <?php endif; ?>
 
         <button type="submit" class="btn btn-primary">Opslaan</button>
         <div class="actions">
             <a class="btn" href="<?= janus_h($backUrl) ?>">Terug</a>
         </div>
     </form>
+
+    <?php if (!$isLightMode): ?>
+        <div class="panel" style="margin-top:12px">
+            <strong>Weergave</strong>
+            <p class="hint" style="margin-top:8px">
+                Light-view toont alleen een kantoordagen-kalender. De volledige urentracker heeft tijden, pauzes en overuren.
+            </p>
+            <form method="post" style="margin:0">
+                <input type="hidden" name="day" value="<?= janus_h($dayParam) ?>">
+                <input type="hidden" name="action" value="enable_light">
+                <button type="submit" class="btn btn-secondary">Terug naar light-view</button>
+            </form>
+        </div>
+    <?php endif; ?>
 </div>
 <script>
 document.getElementById('KilometerHomeWork').addEventListener('input', function (e) {

@@ -184,6 +184,11 @@ if ($email === '') {
 }
 auth_require_page_access('urentracker');
 
+if (janus_is_light_mode($email)) {
+    require __DIR__ . '/index_light.php';
+    exit;
+}
+
 $userName = hours_current_user_name();
 $data = hours_load($email, $userName);
 $userName = hours_resolve_user_name($data, $email);

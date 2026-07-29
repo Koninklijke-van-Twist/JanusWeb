@@ -35,6 +35,8 @@ function hours_default_save_data(string $userName = '', string $userEmail = ''):
         'SaturdayHours' => '00:00:00',
         'SundayHours' => '00:00:00',
         'KilometerHomeWork' => 0.0,
+        // Mon..Sun — used for days without an explicit SavedDays override
+        'DefaultOfficeDays' => [true, true, true, true, true, false, false],
         'MonthExtraTicks' => [],
         'SavedDays' => [],
     ];
@@ -242,6 +244,91 @@ function hours_delete_day(array &$data, DateTimeInterface $date): void
 /**
  * @return array<string, mixed>
  */
+/**
+ * Normalize DefaultOfficeDays to 7 booleans (Mon..Sun).
+ *
+ * @param mixed $value
+ * @return list<bool>
+ */
+function hours_normalize_default_office_days(mixed $value): array
+{
+    $defaults = [true, true, true, true, true, false, false];
+    if (!is_array($value)) {
+        return $defaults;
+    }
+
+    $out = [];
+    for ($i = 0; $i < 7; $i++) {
+        $out[] = !empty($value[$i]);
+    }
+
+    return $out;
+}
+
+/**
+ * @param array<string, mixed> $data
+ * @return list<bool>
+ */
+function hours_get_default_office_days(array $data): array
+{
+    return hours_normalize_default_office_days($data['DefaultOfficeDays'] ?? null);
+}
+
+/**
+ * @param array<string, mixed> $data
+ */
+function hours_default_office_for_weekday(array $data, int $weekdayIndex): bool
+{
+    $days = hours_get_default_office_days($data);
+    $weekdayIndex = max(0, min(6, $weekdayIndex));
+
+    return !empty($days[$weekdayIndex]);
+}
+
+/**
+ * Effective office day: explicit SavedDay wins, otherwise weekday default.
+ *
+ * @param array<string, mixed> $data
+ */
+function hours_is_effective_office_day(array $data, DateTimeInterface $date): bool
+{
+    if (hours_day_exists($data, $date)) {
+        $row = hours_get_day($data, $date);
+        if (!empty($row['isHoliday']) || !empty($row['isSickDay'])) {
+            return false;
+        }
+
+        return !empty($row['HomeWorkDriven']);
+    }
+
+    return hours_default_office_for_weekday($data, hours_weekday_index($date));
+}
+
+/**
+ * Parse posted weekday checkboxes into DefaultOfficeDays.
+ *
+ * @param array<string, mixed> $post
+ * @return list<bool>
+ */
+function hours_default_office_days_from_post(array $post): array
+{
+    $keys = [
+        'DefaultOfficeMon',
+        'DefaultOfficeTue',
+        'DefaultOfficeWed',
+        'DefaultOfficeThu',
+        'DefaultOfficeFri',
+        'DefaultOfficeSat',
+        'DefaultOfficeSun',
+    ];
+    $out = [];
+    foreach ($keys as $i => $key) {
+        $out[] = !empty($post[$key]) || !empty($post['DefaultOfficeDays'][$i]);
+    }
+
+    return $out;
+}
+
 function hours_vacation_day_data(): array
 {
     return hours_enrich_day_data([
@@ -253,6 +340,67 @@ function hours_vacation_day_data(): array
         'isHoliday' => true,
         'isSickDay' => false,
     ]);
+}
+
+/**
+ * Minimal day used by Light-mode office toggles.
+ *
+ * @return array<string, mixed>
+ */
+function hours_office_light_day_data(bool $office): array
+{
+    return hours_enrich_day_data([
+        'StartTime' => '00:00:00',
+        'EndTime' => '00:00:00',
+        'BreakMinutes' => 0,
+        'Kilometers' => 0.0,
+        'HomeWorkDriven' => $office,
+        'isHoliday' => false,
+        'isSickDay' => false,
+    ]);
+}
+
+/**
+ * Day created only by Light mode (no times / leave flags).
+ *
+ * @param array<string, mixed> $day
+ */
+function hours_is_office_light_stub(array $day): bool
+{
+    if (!empty($day['isHoliday']) || !empty($day['isSickDay'])) {
+        return false;
+    }
+    if (hours_parse_timespan((string) ($day['StartTime'] ?? '00:00:00')) !== 0) {
+        return false;
+    }
+    if (hours_parse_timespan((string) ($day['EndTime'] ?? '00:00:00')) !== 0) {
+        return false;
+    }
+    if ((int) ($day['BreakMinutes'] ?? 0) !== 0) {
+        return false;
+    }
+    if ((float) ($day['Kilometers'] ?? 0) != 0.0) {
+        return false;
+    }
+
+    return true;
+}
+
+/**
+ * Day that indicates the user already used the full urentracker.
+ *
+ * @param array<string, mixed> $day
+ */
+function hours_is_full_tracker_day(array $day): bool
+{
+    if (!empty($day['isHoliday']) || !empty($day['isSickDay'])) {
+        return true;
+    }
+    if (!hours_is_office_light_stub($day)) {
+        return true;
+    }
+
+    return false;
 }
 
 /**
@@ -272,7 +420,7 @@ function hours_ensure_day_initialized(array &$data, DateTimeInterface $date): ar
         $start = hours_parse_timespan((string) $day['StartTime']);
         $day['BreakMinutes'] = 0;
         $day['EndTime'] = hours_format_timespan_from_seconds($start + $contract);
-        $day['HomeWorkDriven'] = $contract > 0;
+        $day['HomeWorkDriven'] = hours_default_office_for_weekday($data, $dayNumber);
         $day = hours_enrich_day_data($day);
         $data['SavedDays'][hours_day_key($date)] = $day;
     }
@@ -382,6 +530,7 @@ function hours_load_existing(string $email): ?array
     if (!is_array($data['SavedDays'] ?? null)) {
         $data['SavedDays'] = [];
     }
+    $data['DefaultOfficeDays'] = hours_normalize_default_office_days($data['DefaultOfficeDays'] ?? null);
 
     foreach ($data['SavedDays'] as $dayKey => $day) {
         if (is_array($day)) {
@@ -406,6 +555,10 @@ function hours_list_users_with_data(): array
             continue;
         }
         if (!empty($data['SavedDays']) && is_array($data['SavedDays'])) {
+            $emails[] = $email;
+            continue;
+        }
+        if (function_exists('janus_light_setup_done') && janus_light_setup_done($email)) {
             $emails[] = $email;
         }
     }
@@ -455,6 +608,7 @@ function hours_load(string $email, string $userName = ''): array
     if (!is_array($data['SavedDays'] ?? null)) {
         $data['SavedDays'] = [];
     }
+    $data['DefaultOfficeDays'] = hours_normalize_default_office_days($data['DefaultOfficeDays'] ?? null);
 
     if ($userName !== '' && trim((string) ($data['UserName'] ?? '')) === '') {
         $data['UserName'] = $userName;
@@ -736,11 +890,7 @@ function hours_count_office_days_in_range(array $data, DateTimeInterface $start,
     $last = DateTimeImmutable::createFromInterface($end)->setTime(0, 0, 0);
 
     for ($day = $first; $day <= $last; $day = $day->modify('+1 day')) {
-        if (!hours_day_exists($data, $day)) {
-            continue;
-        }
-        $row = hours_get_day($data, $day);
-        if (!empty($row['HomeWorkDriven']) && empty($row['isHoliday']) && empty($row['isSickDay'])) {
+        if (hours_is_effective_office_day($data, $day)) {
             $count++;
         }
     }
@@ -749,7 +899,7 @@ function hours_count_office_days_in_range(array $data, DateTimeInterface $start,
 }
 
 /**
- * True when at least one SavedDay falls within the inclusive date range.
+ * True when the range has an explicit SavedDay or an effective office day.
  */
 function hours_has_any_day_in_range(array $data, DateTimeInterface $start, DateTimeInterface $end): bool
 {
@@ -757,7 +907,7 @@ function hours_has_any_day_in_range(array $data, DateTimeInterface $start, DateT
     $last = DateTimeImmutable::createFromInterface($end)->setTime(0, 0, 0);
 
     for ($day = $first; $day <= $last; $day = $day->modify('+1 day')) {
-        if (hours_day_exists($data, $day)) {
+        if (hours_day_exists($data, $day) || hours_is_effective_office_day($data, $day)) {
             return true;
         }
     }

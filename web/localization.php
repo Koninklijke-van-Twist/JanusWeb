@@ -74,6 +74,68 @@ function saveUserPref(string $email, string $key, mixed $value): void
     file_put_contents($path, json_encode($prefs, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
 }
 
+/**
+ * Light mode preference. Default true for first-time users without full tracker history.
+ */
+function janus_is_light_mode(string $email): bool
+{
+    $email = strtolower(trim($email));
+    if ($email === '') {
+        return true;
+    }
+
+    $prefs = loadUserPrefs($email);
+    if (array_key_exists('lightMode', $prefs)) {
+        return (bool) $prefs['lightMode'];
+    }
+
+    if (!function_exists('hours_load_existing')) {
+        return true;
+    }
+
+    $data = hours_load_existing($email);
+    if ($data === null || empty($data['SavedDays']) || !is_array($data['SavedDays'])) {
+        return true;
+    }
+
+    foreach ($data['SavedDays'] as $day) {
+        if (is_array($day) && function_exists('hours_is_full_tracker_day') && hours_is_full_tracker_day($day)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+function janus_set_light_mode(string $email, bool $enabled): void
+{
+    saveUserPref($email, 'lightMode', $enabled);
+}
+
+function janus_light_setup_done(string $email): bool
+{
+    $prefs = loadUserPrefs($email);
+
+    return !empty($prefs['lightSetupDone']);
+}
+
+function janus_set_light_setup_done(string $email, bool $done = true): void
+{
+    saveUserPref($email, 'lightSetupDone', $done);
+}
+
+/**
+ * First light visit: ask for default office days before creating hours JSON.
+ */
+function janus_needs_light_setup(string $email): bool
+{
+    if (!janus_is_light_mode($email)) {
+        return false;
+    }
+
+    return !janus_light_setup_done($email);
+}
+
 function getCurrentLanguage(): string
 {
     $lang = strtolower(trim((string) ($_GET['lang'] ?? '')));

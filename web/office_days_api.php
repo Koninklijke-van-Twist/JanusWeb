@@ -5,6 +5,7 @@ error_reporting(E_ALL);
 
 require_once __DIR__ . '/auth.php';
 require_once __DIR__ . '/logincheck.php';
+require_once __DIR__ . '/localization.php';
 require_once __DIR__ . '/hours_data.php';
 
 function office_json(array $payload, int $status = 200): never
@@ -45,7 +46,10 @@ foreach (hours_list_users_with_data() as $email) {
     }
     $name = hours_resolve_user_name($data, $email);
     $hasDataInRange = hours_has_any_day_in_range($data, $start, $end);
-    $missing = hours_missing_days_in_range($data, $start, $end);
+    $missing = [];
+    if (!janus_is_light_mode($email)) {
+        $missing = hours_missing_days_in_range($data, $start, $end);
+    }
     $missingLabels = [];
     foreach ($missing as $iso) {
         $dt = DateTimeImmutable::createFromFormat('Y-m-d', (string) $iso);
