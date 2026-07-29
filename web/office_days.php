@@ -52,18 +52,9 @@ $canAccessOverview = auth_can_access_page('overzicht');
         .btn-primary { background: var(--kvt-main-blue); border-color: var(--kvt-main-blue); color: #fff; }
         .panel { border: 1px solid var(--kvt-line); border-radius: 6px; padding: 12px; background: #fff; margin-top: 12px; }
         .range-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 100%; }
-        .person-row { margin-top: 12px; }
-        select.person-select {
-            width: 100%;
-            padding: 8px;
-            border: 1px solid var(--kvt-line);
-            border-radius: 4px;
-            font-size: 1rem;
-            background: #fff;
-        }
         label { display: block; font-size: 0.82rem; color: var(--kvt-muted); margin-bottom: 4px; }
         input[type="date"] { width: 100%; padding: 8px; border: 1px solid var(--kvt-line); border-radius: 4px; font-size: 1rem; }
-        .users { display: grid; gap: 10px; }
+        .users { display: grid; gap: 10px; margin-top: 12px; }
         .user-card { border: 1px solid var(--kvt-line); border-radius: 6px; padding: 12px; background: #fff; }
         .user-card.warn { animation: officeWarn 1s linear infinite alternate; border-color: #f59e0b; }
         .row-head { justify-content: space-between; align-items: flex-start; }
@@ -72,6 +63,22 @@ $canAccessOverview = auth_can_access_page('overzicht');
         .office-total { font-size: 1.2rem; font-weight: 700; color: var(--kvt-perkins-blue); margin: 8px 0; }
         .warning { margin-top: 8px; padding: 8px 10px; border-radius: 4px; background: #fff3cd; color: #8a5800; font-size: 0.9rem; }
         .empty { color: var(--kvt-muted); text-align: center; padding: 18px; }
+        .list-separator {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin: 6px 0 2px;
+            color: var(--kvt-muted);
+            font-size: 0.88rem;
+            font-weight: 600;
+        }
+        .list-separator::before,
+        .list-separator::after {
+            content: "";
+            flex: 1;
+            height: 1px;
+            background: var(--kvt-line);
+        }
         .pdf-modal {
             position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; align-items: stretch;
             justify-content: center; z-index: 2000; padding: 10px;
@@ -127,12 +134,6 @@ $canAccessOverview = auth_can_access_page('overzicht');
                 <input type="date" id="end" value="<?= office_h($today->format('Y-m-d')) ?>">
             </div>
         </div>
-        <div class="person-row">
-            <label for="personSelect">Medewerker</label>
-            <select id="personSelect" class="person-select" disabled>
-                <option value="">Laden...</option>
-            </select>
-        </div>
         <div class="muted" id="rangeStatus" style="margin-top:10px;">Laden...</div>
     </div>
 
@@ -159,15 +160,12 @@ $canAccessOverview = auth_can_access_page('overzicht');
     var start = document.getElementById('start');
     var end = document.getElementById('end');
     var users = document.getElementById('users');
-    var personSelect = document.getElementById('personSelect');
     var rangeStatus = document.getElementById('rangeStatus');
     var pdfModal = document.getElementById('pdfModal');
     var pdfPreviewContent = document.getElementById('pdfPreviewContent');
     var pdfModalClose = document.getElementById('pdfModalClose');
     var pdfModalPrint = document.getElementById('pdfModalPrint');
     var reloadTimer = 0;
-    var currentRows = [];
-    var selectedEmail = '';
 
     function esc(value) {
         return String(value ?? '').replace(/[&<>"]/g, function (char) {
@@ -197,46 +195,11 @@ $canAccessOverview = auth_can_access_page('overzicht');
             });
     }
 
-    function fillPersonSelect(rows) {
-        var previous = selectedEmail || personSelect.value;
-        personSelect.innerHTML = '';
-        if (!rows.length) {
-            personSelect.disabled = true;
-            var empty = document.createElement('option');
-            empty.value = '';
-            empty.textContent = 'Geen medewerkers met data';
-            personSelect.appendChild(empty);
-            selectedEmail = '';
-            return;
-        }
-
-        personSelect.disabled = false;
-        rows.forEach(function (row) {
-            var option = document.createElement('option');
-            option.value = row.email;
-            option.textContent = row.name || row.email;
-            personSelect.appendChild(option);
-        });
-
-        var stillExists = rows.some(function (row) { return row.email === previous; });
-        selectedEmail = stillExists ? previous : rows[0].email;
-        personSelect.value = selectedEmail;
-    }
-
-    function renderSelected() {
-        if (!currentRows.length || !selectedEmail) {
-            users.innerHTML = '<div class="panel empty">Geen gebruikersdata gevonden.</div>';
-            return;
-        }
-
-        var row = currentRows.find(function (item) { return item.email === selectedEmail; }) || currentRows[0];
-        selectedEmail = row.email;
-        personSelect.value = selectedEmail;
-
+    function renderCard(row) {
         var warningHtml = row.warning
             ? '<div class="warning">' + esc(row.warning) + '</div>'
             : '';
-        users.innerHTML = ''
+        return ''
             + '<div class="user-card' + (row.missingDays.length ? ' warn' : '') + '">'
             + '  <div class="row-head">'
             + '    <div>'
@@ -244,20 +207,41 @@ $canAccessOverview = auth_can_access_page('overzicht');
             + '      <div class="user-email">' + esc(row.email) + '</div>'
             + '    </div>'
             + '    <div class="user-actions">'
-            + '      <button type="button" class="btn btn-primary" id="officePdfBtn">PDF</button>'
+            + '      <button type="button" class="btn btn-primary js-pdf" data-email="' + esc(row.email) + '">PDF</button>'
             + '    </div>'
             + '  </div>'
             + '  <div class="office-total">' + esc(row.officeDays) + ' kantoordagen</div>'
             + warningHtml
             + '</div>';
+    }
 
-        document.getElementById('officePdfBtn').addEventListener('click', function () {
-            var url = 'export_preview.php?fragment=1&mode=custom'
-                + '&user=' + encodeURIComponent(row.email)
-                + '&start=' + encodeURIComponent(start.value)
-                + '&end=' + encodeURIComponent(end.value)
-                + '&_ts=' + Date.now();
-            loadPreview(url);
+    function renderRows(rows) {
+        if (!rows.length) {
+            users.innerHTML = '<div class="panel empty">Geen gebruikersdata gevonden.</div>';
+            return;
+        }
+
+        var html = '';
+        var separatorAdded = false;
+        rows.forEach(function (row) {
+            if (!row.hasDataInRange && !separatorAdded) {
+                html += '<div class="list-separator">Geen data in opgegeven range</div>';
+                separatorAdded = true;
+            }
+            html += renderCard(row);
+        });
+        users.innerHTML = html;
+
+        Array.prototype.forEach.call(document.querySelectorAll('.js-pdf'), function (button) {
+            button.addEventListener('click', function () {
+                var email = button.getAttribute('data-email') || '';
+                var url = 'export_preview.php?fragment=1&mode=custom'
+                    + '&user=' + encodeURIComponent(email)
+                    + '&start=' + encodeURIComponent(start.value)
+                    + '&end=' + encodeURIComponent(end.value)
+                    + '&_ts=' + Date.now();
+                loadPreview(url);
+            });
         });
     }
 
@@ -278,14 +262,10 @@ $canAccessOverview = auth_can_access_page('overzicht');
                 var startLabel = payload.startLabel || payload.start;
                 var endLabel = payload.endLabel || payload.end;
                 rangeStatus.textContent = 'Periode: ' + startLabel + ' t/m ' + endLabel;
-                currentRows = payload.rows || [];
-                fillPersonSelect(currentRows);
-                renderSelected();
+                renderRows(payload.rows || []);
             })
             .catch(function () {
                 rangeStatus.textContent = 'Laden mislukt.';
-                currentRows = [];
-                fillPersonSelect([]);
                 users.innerHTML = '<div class="panel empty">Laden mislukt.</div>';
             });
     }
@@ -299,10 +279,6 @@ $canAccessOverview = auth_can_access_page('overzicht');
     end.addEventListener('input', scheduleReload);
     start.addEventListener('change', scheduleReload);
     end.addEventListener('change', scheduleReload);
-    personSelect.addEventListener('change', function () {
-        selectedEmail = personSelect.value || '';
-        renderSelected();
-    });
 
     pdfModalClose.addEventListener('click', closePdfModal);
     pdfModalPrint.addEventListener('click', function () {

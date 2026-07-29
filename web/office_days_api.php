@@ -44,6 +44,7 @@ foreach (hours_list_users_with_data() as $email) {
         continue;
     }
     $name = hours_resolve_user_name($data, $email);
+    $hasDataInRange = hours_has_any_day_in_range($data, $start, $end);
     $missing = hours_missing_days_in_range($data, $start, $end);
     $missingLabels = [];
     foreach ($missing as $iso) {
@@ -55,6 +56,7 @@ foreach (hours_list_users_with_data() as $email) {
     $rows[] = [
         'email' => $email,
         'name' => $name,
+        'hasDataInRange' => $hasDataInRange,
         'officeDays' => hours_count_office_days_in_range($data, $start, $end),
         'missingDays' => $missingLabels,
         'warning' => $missingLabels === [] ? '' : ('Ontbrekende dagen: ' . implode(', ', $missingLabels)),
@@ -62,6 +64,12 @@ foreach (hours_list_users_with_data() as $email) {
 }
 
 usort($rows, static function (array $a, array $b): int {
+    $aHas = !empty($a['hasDataInRange']);
+    $bHas = !empty($b['hasDataInRange']);
+    if ($aHas !== $bHas) {
+        return $aHas ? -1 : 1;
+    }
+
     return strcasecmp($a['name'], $b['name']) ?: strcasecmp($a['email'], $b['email']);
 });
 

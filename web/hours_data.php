@@ -749,6 +749,23 @@ function hours_count_office_days_in_range(array $data, DateTimeInterface $start,
 }
 
 /**
+ * True when at least one SavedDay falls within the inclusive date range.
+ */
+function hours_has_any_day_in_range(array $data, DateTimeInterface $start, DateTimeInterface $end): bool
+{
+    $first = DateTimeImmutable::createFromInterface($start)->setTime(0, 0, 0);
+    $last = DateTimeImmutable::createFromInterface($end)->setTime(0, 0, 0);
+
+    for ($day = $first; $day <= $last; $day = $day->modify('+1 day')) {
+        if (hours_day_exists($data, $day)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
  * Missing weekdays in range where no data exists at all.
  *
  * @return list<string>
