@@ -208,28 +208,32 @@ function hours_get_work_hours_seconds(array $data, int $dayNumber): int
 }
 
 /**
- * Away/vacation status for a single day (for Asclepius sync).
+ * Away/vacation/sick status for a single day (for Asclepius sync).
  *
  * @param array<string, mixed> $data
- * @return array{known: true, holiday: bool, contractOff: bool, locked: bool, reason: string|null}
+ * @return array{known: true, holiday: bool, sick: bool, contractOff: bool, locked: bool, reason: string|null}
  */
 function hours_day_away_status(array $data, DateTimeInterface $date): array
 {
     $weekday = hours_weekday_index($date);
     $contractOff = hours_get_work_hours_seconds($data, $weekday) <= 0;
     $holiday = false;
+    $sick = false;
     if (hours_day_exists($data, $date)) {
         $key = hours_day_key($date);
         $day = $data['SavedDays'][$key] ?? null;
         if (is_array($day)) {
             $holiday = !empty($day['isHoliday']);
+            $sick = !empty($day['isSickDay']);
         }
     }
 
-    $locked = $holiday || $contractOff;
+    $locked = $holiday || $sick || $contractOff;
     $reason = null;
     if ($holiday) {
         $reason = 'janus_holiday';
+    } elseif ($sick) {
+        $reason = 'janus_sick';
     } elseif ($contractOff) {
         $reason = 'contract_off';
     }
@@ -237,6 +241,7 @@ function hours_day_away_status(array $data, DateTimeInterface $date): array
     return [
         'known' => true,
         'holiday' => $holiday,
+        'sick' => $sick,
         'contractOff' => $contractOff,
         'locked' => $locked,
         'reason' => $reason,

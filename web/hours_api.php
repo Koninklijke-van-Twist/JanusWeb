@@ -133,6 +133,7 @@ foreach ($emails as $email) {
         $users[$email] = [
             'known' => false,
             'holiday' => false,
+            'sick' => false,
             'contractOff' => false,
             'locked' => false,
             'reason' => null,
