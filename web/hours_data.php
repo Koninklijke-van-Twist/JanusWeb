@@ -208,6 +208,42 @@ function hours_get_work_hours_seconds(array $data, int $dayNumber): int
 }
 
 /**
+ * Away/vacation status for a single day (for Asclepius sync).
+ *
+ * @param array<string, mixed> $data
+ * @return array{known: true, holiday: bool, contractOff: bool, locked: bool, reason: string|null}
+ */
+function hours_day_away_status(array $data, DateTimeInterface $date): array
+{
+    $weekday = hours_weekday_index($date);
+    $contractOff = hours_get_work_hours_seconds($data, $weekday) <= 0;
+    $holiday = false;
+    if (hours_day_exists($data, $date)) {
+        $key = hours_day_key($date);
+        $day = $data['SavedDays'][$key] ?? null;
+        if (is_array($day)) {
+            $holiday = !empty($day['isHoliday']);
+        }
+    }
+
+    $locked = $holiday || $contractOff;
+    $reason = null;
+    if ($holiday) {
+        $reason = 'janus_holiday';
+    } elseif ($contractOff) {
+        $reason = 'contract_off';
+    }
+
+    return [
+        'known' => true,
+        'holiday' => $holiday,
+        'contractOff' => $contractOff,
+        'locked' => $locked,
+        'reason' => $reason,
+    ];
+}
+
+/**
  * @param array<string, mixed> $data
  * @return array<string, mixed>
  */
