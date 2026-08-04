@@ -11,6 +11,8 @@ require_once __DIR__ . '/logincheck.php';
 require_once __DIR__ . '/localization.php';
 require_once __DIR__ . '/hours_data.php';
 
+date_default_timezone_set('Europe/Amsterdam');
+
 /**
  * Functies
  */
@@ -144,7 +146,7 @@ function janus_week_strip(array $data, DateTimeImmutable $selectedDay): array
                 $entry['hours'] = 'ZIEK';
                 $minutes = 0;
             } else {
-                $worked = hours_parse_timespan((string) $dayData['WorkedTime']);
+                $worked = hours_worked_seconds_from_day($dayData);
                 $entry['hours'] = ($contract <= 0 && $worked <= 0) ? 'VRIJ' : hours_format_hhmm_from_seconds($worked);
                 $minutes = (int) round(($worked - $contract) / 60);
             }
@@ -262,16 +264,7 @@ $extraPrev = hours_calculate_extra_seconds($data, $selectedDay, true);
 $extraTotal = $extra + $extraPrev;
 
 $contractSeconds = hours_get_work_hours_seconds($data, hours_weekday_index($selectedDay));
-$selectedWorkedSeconds = hours_parse_timespan((string) ($dayData['WorkedTime'] ?? '00:00:00'));
-$selectedExtraContribution = 0;
-if (
-    ($contractSeconds > 0 || $selectedWorkedSeconds > 0)
-    && empty($dayData['isHoliday'])
-    && empty($dayData['isSickDay'])
-    && $selectedDay <= $today
-) {
-    $selectedExtraContribution = $selectedWorkedSeconds - $contractSeconds;
-}
+$selectedExtraContribution = hours_day_extra_contribution($data, $selectedDay, $today);
 $extraBaseWithoutSelected = $extra - $selectedExtraContribution;
 
 // Persist refreshed MonthExtraTicks

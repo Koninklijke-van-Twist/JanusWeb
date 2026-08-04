@@ -78,9 +78,7 @@ function hours_enrich_day_data(array $day): array
 {
     $start = hours_parse_timespan((string) ($day['StartTime'] ?? '09:00:00'));
     $end = hours_parse_timespan((string) ($day['EndTime'] ?? '17:30:00'));
-    $break = (int) ($day['BreakMinutes'] ?? 0);
-    $workedSeconds = ($end - $start) - ($break * 60);
-    $worked = hours_format_timespan_from_seconds($workedSeconds);
+    $break = max(0, (int) ($day['BreakMinutes'] ?? 0));
 
     $day['StartTime'] = hours_format_timespan_from_seconds($start);
     $day['EndTime'] = hours_format_timespan_from_seconds($end);
@@ -89,7 +87,9 @@ function hours_enrich_day_data(array $day): array
     $day['HomeWorkDriven'] = (bool) ($day['HomeWorkDriven'] ?? false);
     $day['isHoliday'] = (bool) ($day['isHoliday'] ?? false);
     $day['isSickDay'] = (bool) ($day['isSickDay'] ?? false);
-    $day['WorkedTime'] = $worked;
+
+    $workedSeconds = hours_worked_seconds_from_day($day);
+    $day['WorkedTime'] = hours_format_timespan_from_seconds($workedSeconds);
     $day['WorkedString'] = hours_worked_string_from_seconds($workedSeconds);
 
     return $day;
@@ -153,6 +153,57 @@ function hours_format_timespan_from_seconds(int $seconds): string
     $formatted = sprintf('%02d:%02d:%02d', $h, $m, $s);
 
     return $negative ? '-' . $formatted : $formatted;
+}
+
+/**
+ * Worked seconds from Start/End/Break (ignores stored WorkedTime).
+ *
+ * @param array<string, mixed> $day
+ */
+function hours_worked_seconds_from_day(array $day): int
+{
+    if (!empty($day['isHoliday']) || !empty($day['isSickDay'])) {
+        return 0;
+    }
+
+    $start = hours_parse_timespan((string) ($day['StartTime'] ?? '00:00:00'));
+    $end = hours_parse_timespan((string) ($day['EndTime'] ?? '00:00:00'));
+    $break = max(0, (int) ($day['BreakMinutes'] ?? 0));
+    $worked = ($end - $start) - ($break * 60);
+
+    return $worked > 0 ? $worked : 0;
+}
+
+/**
+ * Overtime contribution for one calendar day, or 0 when excluded.
+ *
+ * @param array<string, mixed> $data
+ */
+function hours_day_extra_contribution(array $data, DateTimeInterface $date, ?DateTimeInterface $today = null): int
+{
+    $today = $today ?? new DateTimeImmutable('today', new DateTimeZone('Europe/Amsterdam'));
+    if ($date > $today) {
+        return 0;
+    }
+    if (!hours_day_exists($data, $date)) {
+        return 0;
+    }
+
+    $dayData = $data['SavedDays'][hours_day_key($date)] ?? null;
+    if (!is_array($dayData)) {
+        return 0;
+    }
+    if (!empty($dayData['isHoliday']) || !empty($dayData['isSickDay'])) {
+        return 0;
+    }
+
+    $contract = hours_get_work_hours_seconds($data, hours_weekday_index($date));
+    $worked = hours_worked_seconds_from_day($dayData);
+    if ($contract <= 0 && $worked <= 0) {
+        return 0;
+    }
+
+    return $worked - $contract;
 }
 
 function hours_format_hhmm_from_seconds(int $seconds): string
@@ -1057,28 +1108,11 @@ function hours_calculate_extra_seconds(array &$data, DateTimeInterface $selected
 
     $firstDay = new DateTimeImmutable(sprintf('%04d-%02d-01', $year, $month));
     $lastDay = $firstDay->modify('last day of this month');
-    $today = new DateTimeImmutable('today');
+    $today = new DateTimeImmutable('today', new DateTimeZone('Europe/Amsterdam'));
     $extraSeconds = 0;
 
     for ($day = $firstDay; $day <= $lastDay; $day = $day->modify('+1 day')) {
-        $dayNumber = hours_weekday_index($day);
-        $contract = hours_get_work_hours_seconds($data, $dayNumber);
-
-        if (!hours_day_exists($data, $day)) {
-            continue;
-        }
-
-        $dayData = hours_get_day($data, $day);
-        $worked = hours_parse_timespan((string) $dayData['WorkedTime']);
-
-        if (
-            ($contract > 0 || $worked > 0)
-            && empty($dayData['isHoliday'])
-            && empty($dayData['isSickDay'])
-            && $day <= $today
-        ) {
-            $extraSeconds += ($worked - $contract);
-        }
+        $extraSeconds += hours_day_extra_contribution($data, $day, $today);
     }
 
     hours_set_saved_month_extra($data, $year, $month, $extraSeconds);
