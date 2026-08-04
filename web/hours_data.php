@@ -249,6 +249,174 @@ function hours_day_away_status(array $data, DateTimeInterface $date): array
 }
 
 /**
+ * Last consecutive vacation day starting at $date (inclusive), or null if not on holiday.
+ */
+function hours_holiday_end_date(array $data, DateTimeInterface $date): ?DateTimeImmutable
+{
+    if (!hours_day_exists($data, $date)) {
+        return null;
+    }
+    $key = hours_day_key($date);
+    $day = $data['SavedDays'][$key] ?? null;
+    if (!is_array($day) || empty($day['isHoliday'])) {
+        return null;
+    }
+
+    $end = $date instanceof DateTimeImmutable ? $date : DateTimeImmutable::createFromInterface($date);
+    $cursor = $end;
+    for ($i = 0; $i < 365; $i++) {
+        $next = $cursor->modify('+1 day');
+        if (!hours_day_exists($data, $next)) {
+            break;
+        }
+        $nextKey = hours_day_key($next);
+        $nextDay = $data['SavedDays'][$nextKey] ?? null;
+        if (!is_array($nextDay) || empty($nextDay['isHoliday'])) {
+            break;
+        }
+        $end = $next;
+        $cursor = $next;
+    }
+
+    return $end;
+}
+
+/**
+ * Live presence status for Asclepius sidebar (full tracker only).
+ *
+ * @param array<string, mixed> $data
+ * @return array{
+ *   visible: bool,
+ *   status: string|null,
+ *   lightMode: bool,
+ *   name: string,
+ *   office: bool,
+ *   startTime: string|null,
+ *   endTime: string|null,
+ *   holidayUntil: string|null,
+ *   contractOff: bool,
+ *   knownDay: bool
+ * }
+ */
+function hours_day_presence_status(array $data, DateTimeInterface $date, ?DateTimeInterface $now = null): array
+{
+    $email = strtolower(trim((string) ($data['UserEmail'] ?? '')));
+    $name = trim((string) ($data['UserName'] ?? ''));
+    $lightMode = true;
+    if ($email !== '' && function_exists('loadUserPrefs')) {
+        $prefs = loadUserPrefs($email);
+        if (array_key_exists('lightMode', $prefs)) {
+            $lightMode = (bool) $prefs['lightMode'];
+        } else {
+            $lightMode = true;
+            foreach (($data['SavedDays'] ?? []) as $savedDay) {
+                if (is_array($savedDay) && hours_is_full_tracker_day($savedDay)) {
+                    $lightMode = false;
+                    break;
+                }
+            }
+        }
+    } elseif (function_exists('hours_is_full_tracker_day')) {
+        foreach (($data['SavedDays'] ?? []) as $savedDay) {
+            if (is_array($savedDay) && hours_is_full_tracker_day($savedDay)) {
+                $lightMode = false;
+                break;
+            }
+        }
+    }
+    $now = $now ?? new DateTimeImmutable('now');
+    $weekday = hours_weekday_index($date);
+    $contractOff = hours_get_work_hours_seconds($data, $weekday) <= 0;
+
+    $base = [
+        'visible' => false,
+        'status' => null,
+        'lightMode' => $lightMode,
+        'name' => $name,
+        'office' => false,
+        'startTime' => null,
+        'endTime' => null,
+        'holidayUntil' => null,
+        'contractOff' => $contractOff,
+        'knownDay' => false,
+    ];
+
+    if ($lightMode) {
+        return $base;
+    }
+
+    $base['visible'] = true;
+    $knownDay = hours_day_exists($data, $date);
+    $base['knownDay'] = $knownDay;
+
+    $holiday = false;
+    $sick = false;
+    $office = hours_default_office_for_date($data, $date);
+    $startSeconds = null;
+    $endSeconds = null;
+
+    if ($knownDay) {
+        $key = hours_day_key($date);
+        $day = $data['SavedDays'][$key] ?? null;
+        if (is_array($day)) {
+            $holiday = !empty($day['isHoliday']);
+            $sick = !empty($day['isSickDay']);
+            $office = !empty($day['HomeWorkDriven']);
+            $startSeconds = hours_parse_timespan((string) ($day['StartTime'] ?? '00:00:00'));
+            $endSeconds = hours_parse_timespan((string) ($day['EndTime'] ?? '00:00:00'));
+            $base['startTime'] = substr((string) ($day['StartTime'] ?? '00:00:00'), 0, 5);
+            $base['endTime'] = substr((string) ($day['EndTime'] ?? '00:00:00'), 0, 5);
+        }
+    }
+
+    $base['office'] = $office;
+
+    if ($holiday) {
+        $until = hours_holiday_end_date($data, $date);
+        $base['status'] = 'holiday';
+        $base['holidayUntil'] = $until instanceof DateTimeImmutable ? $until->format('Y-m-d') : $date->format('Y-m-d');
+
+        return $base;
+    }
+
+    if ($sick) {
+        $base['status'] = 'sick';
+
+        return $base;
+    }
+
+    if (!$knownDay) {
+        $base['status'] = 'unknown';
+
+        return $base;
+    }
+
+    $nowSeconds = ((int) $now->format('G')) * 3600
+        + ((int) $now->format('i')) * 60
+        + (int) $now->format('s');
+    $withinTimes = $startSeconds !== null
+        && $endSeconds !== null
+        && $nowSeconds >= $startSeconds
+        && $nowSeconds <= $endSeconds;
+
+    if ($contractOff && !$withinTimes) {
+        $base['status'] = 'off_today';
+
+        return $base;
+    }
+
+    if ($withinTimes) {
+        $base['status'] = $office ? 'present_office' : 'present_home';
+
+        return $base;
+    }
+
+    $base['status'] = 'absent';
+
+    return $base;
+}
+
+/**
  * @param array<string, mixed> $data
  * @return array<string, mixed>
  */

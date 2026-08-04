@@ -766,8 +766,16 @@ $headerDateLabel = janus_nl_date_ui($selectedDay);
         <div class="flash flash-err"><?= janus_h($error) ?></div>
     <?php endif; ?>
 
-    <form method="post" id="dayForm" action="index.php">
-        <input type="hidden" name="day" value="<?= janus_h($selectedDay->format('Y-m-d')) ?>">
+    <form method="post" id="dayForm" action="index.php" autocomplete="off"
+          data-server-start="<?= janus_h($startValue) ?>"
+          data-server-end="<?= janus_h($endValue) ?>"
+          data-server-break="<?= (int) $dayData['BreakMinutes'] ?>"
+          data-server-km="<?= janus_h((string) (int) $dayData['Kilometers']) ?>"
+          data-server-office="<?= !empty($dayData['HomeWorkDriven']) ? '1' : '0' ?>"
+          data-server-holiday="<?= !empty($dayData['isHoliday']) ? '1' : '0' ?>"
+          data-server-sick="<?= !empty($dayData['isSickDay']) ? '1' : '0' ?>"
+          data-day-new="<?= !empty($selectedDayWasNew) ? '1' : '0' ?>">
+        <input type="hidden" name="day" value="<?= janus_h($selectedDay->format('Y-m-d')) ?>" autocomplete="off">
         <input type="hidden" name="action" id="formAction" value="save">
         <input type="hidden" name="goto_day" id="gotoDay" value="">
 
@@ -790,14 +798,14 @@ $headerDateLabel = janus_nl_date_ui($selectedDay);
             <div class="time-grid">
                 <div>
                     <label for="startTime">Begintijd</label>
-                    <input type="time" id="startTime" name="startTime" value="<?= janus_h($startValue) ?>" <?= $timeDisabled ? 'disabled' : '' ?>>
+                    <input type="time" id="startTime" name="startTime" value="<?= janus_h($startValue) ?>" autocomplete="off" <?= $timeDisabled ? 'disabled' : '' ?>>
                     <div class="shortcuts">
                         <button type="button" class="btn" id="btnStartNow" <?= $timeDisabled ? 'disabled' : '' ?>>Nu</button>
                     </div>
                 </div>
                 <div>
                     <label for="endTime">Eindtijd</label>
-                    <input type="time" id="endTime" name="endTime" value="<?= janus_h($endValue) ?>" <?= $timeDisabled ? 'disabled' : '' ?>>
+                    <input type="time" id="endTime" name="endTime" value="<?= janus_h($endValue) ?>" autocomplete="off" <?= $timeDisabled ? 'disabled' : '' ?>>
                     <div class="shortcuts">
                         <button type="button" class="btn" id="btnEndNow" <?= $timeDisabled ? 'disabled' : '' ?>>Nu</button>
                         <button type="button" class="btn" id="btnAutoEnd" <?= $timeDisabled ? 'disabled' : '' ?>>Auto</button>
@@ -807,7 +815,7 @@ $headerDateLabel = janus_nl_date_ui($selectedDay);
 
             <div style="margin-top:12px">
                 <label for="breakMinutes">Pauze (minuten)</label>
-                <input type="number" id="breakMinutes" name="breakMinutes" min="0" max="600"
+                <input type="number" id="breakMinutes" name="breakMinutes" min="0" max="600" autocomplete="off"
                        value="<?= (int) $dayData['BreakMinutes'] ?>" <?= $timeDisabled ? 'disabled' : '' ?>>
                 <div class="shortcuts">
                     <button type="button" class="btn break-preset" data-minutes="30" <?= $timeDisabled ? 'disabled' : '' ?>>30</button>
@@ -965,7 +973,40 @@ $headerDateLabel = janus_nl_date_ui($selectedDay);
     var autosaveStatus = document.getElementById('autosaveStatus');
     var autosaveTimer = 0;
     var autosaveInFlight = false;
+    var allowAutosave = false;
+    var dayForm = document.getElementById('dayForm');
     var todayIso = '<?= janus_h($today->format('Y-m-d')) ?>';
+
+    function applyServerFieldValues() {
+        if (!dayForm) return;
+        var serverStart = dayForm.getAttribute('data-server-start') || '';
+        var serverEnd = dayForm.getAttribute('data-server-end') || '';
+        var serverBreak = dayForm.getAttribute('data-server-break') || '0';
+        var serverKm = dayForm.getAttribute('data-server-km') || '0';
+        var serverOffice = dayForm.getAttribute('data-server-office') === '1';
+        var serverHoliday = dayForm.getAttribute('data-server-holiday') === '1';
+        var serverSick = dayForm.getAttribute('data-server-sick') === '1';
+        if (start) start.value = serverStart;
+        if (end) end.value = serverEnd;
+        if (brk) brk.value = serverBreak;
+        var km = document.getElementById('kilometers');
+        if (km) km.value = serverKm;
+        var office = document.getElementById('homeWorkDriven');
+        if (office) office.checked = serverOffice;
+        if (holiday) holiday.checked = serverHoliday;
+        if (sick) sick.checked = serverSick;
+        applySpecialDayState();
+        updateDayHeader();
+    }
+
+    function enableAutosave() {
+        allowAutosave = true;
+    }
+
+    function localTodayIso() {
+        var d = new Date();
+        return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+    }
 
     function pad(n) { return (n < 10 ? '0' : '') + n; }
     function nowHm() {
@@ -1065,8 +1106,15 @@ $headerDateLabel = janus_nl_date_ui($selectedDay);
         if (sick.checked) form.append('isSickDay', '1');
         return form;
     }
+    function scheduleAutosave() {
+        if (!allowAutosave) return;
+        clearTimeout(autosaveTimer);
+        setAutosaveStatus('Wijzigingen...', 'var(--kvt-muted)');
+        autosaveTimer = setTimeout(autosaveNow, 250);
+    }
+
     function autosaveNow() {
-        if (autosaveInFlight) return;
+        if (!allowAutosave || autosaveInFlight) return;
         autosaveInFlight = true;
         setAutosaveStatus('Opslaan...', 'var(--kvt-muted)');
         fetch('hours_save.php', {
@@ -1087,11 +1135,6 @@ $headerDateLabel = janus_nl_date_ui($selectedDay);
                 autosaveInFlight = false;
                 setAutosaveStatus('Opslaan mislukt', '#b42318');
             });
-    }
-    function scheduleAutosave() {
-        clearTimeout(autosaveTimer);
-        setAutosaveStatus('Wijzigingen...', 'var(--kvt-muted)');
-        autosaveTimer = setTimeout(autosaveNow, 250);
     }
 
     document.getElementById('btnStartNow').addEventListener('click', function () {
@@ -1156,6 +1199,23 @@ $headerDateLabel = janus_nl_date_ui($selectedDay);
     document.getElementById('homeWorkDriven').addEventListener('change', scheduleAutosave);
     document.getElementById('kilometers').addEventListener('input', scheduleAutosave);
     document.getElementById('kilometers').addEventListener('change', scheduleAutosave);
+
+    // Prevent browser form-restore/autofill from overwriting server day defaults,
+    // then writing those restored values via autosave onto a new calendar day.
+    applyServerFieldValues();
+    if (dayForm) {
+        dayForm.addEventListener('pointerdown', enableAutosave);
+        dayForm.addEventListener('keydown', enableAutosave);
+    }
+    window.addEventListener('pageshow', function () {
+        var dayInput = dayForm ? dayForm.querySelector('input[name="day"]') : null;
+        if (dayInput && dayInput.value === todayIso && todayIso !== localTodayIso()) {
+            location.reload();
+            return;
+        }
+        allowAutosave = false;
+        applyServerFieldValues();
+    });
 
     // Re-enable disabled fields on submit so values are posted
     document.getElementById('dayForm').addEventListener('submit', function () {

@@ -8,6 +8,7 @@ ini_set('display_errors', 0);
 error_reporting(E_ALL);
 
 require_once __DIR__ . '/hours_data.php';
+require_once __DIR__ . '/localization.php';
 
 function hours_api_json(array $payload, int $status = 200): never
 {
@@ -121,14 +122,34 @@ if ($date === null) {
     hours_api_json(['ok' => false, 'error' => 'Ongeldige datum.'], 422);
 }
 
+$action = strtolower(trim((string) ($_GET['action'] ?? $_POST['action'] ?? 'away')));
+if ($action !== 'away' && $action !== 'presence') {
+    hours_api_json(['ok' => false, 'error' => 'Ongeldige action.'], 422);
+}
+
 $emails = hours_api_parse_emails($_GET['emails'] ?? $_POST['emails'] ?? '');
-if ($emails === []) {
+if ($emails === [] && $action === 'presence') {
+    $emails = hours_list_user_emails();
+}
+if ($emails === [] && $action !== 'presence') {
     hours_api_json(['ok' => false, 'error' => 'Geen geldige e-mailadressen.'], 422);
 }
 
 $users = [];
 foreach ($emails as $email) {
     $data = hours_load_existing($email);
+    if ($action === 'presence') {
+        if ($data === null) {
+            continue;
+        }
+        $presence = hours_day_presence_status($data, $date);
+        if (empty($presence['visible'])) {
+            continue;
+        }
+        $users[$email] = $presence;
+        continue;
+    }
+
     if ($data === null) {
         $users[$email] = [
             'known' => false,
@@ -146,6 +167,7 @@ foreach ($emails as $email) {
 
 hours_api_json([
     'ok' => true,
+    'action' => $action,
     'date' => $date->format('Y-m-d'),
     'weekday' => strtolower($date->format('l')),
     'users' => $users,
