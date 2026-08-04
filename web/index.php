@@ -858,6 +858,7 @@ $headerDateLabel = janus_nl_date_ui($selectedDay);
             <div class="week-strip">
                 <?php foreach ($weekStrip as $cell): ?>
                     <button type="submit" class="week-day<?= $cell['selected'] ? ' selected' : '' ?>"
+                            data-date="<?= janus_h($cell['date']->format('Y-m-d')) ?>"
                             onclick="document.getElementById('formAction').value='goto'; document.getElementById('gotoDay').value='<?= janus_h($cell['date']->format('Y-m-d')) ?>';">
                         <span class="name"><?= janus_h($cell['label']) ?></span>
                         <span class="hours"><?= janus_h($cell['hours']) ?></span>
@@ -1046,8 +1047,59 @@ $headerDateLabel = janus_nl_date_ui($selectedDay);
         var worked = parseHm(end.value) - parseHm(start.value) - ((parseInt(brk.value, 10) || 0) * 60);
         return worked < 0 ? 0 : worked;
     }
+    function formatWorkedHoursLabel(workedSeconds) {
+        if (contractSeconds <= 0 && workedSeconds <= 0) {
+            return 'VRIJ';
+        }
+        var sec = workedSeconds < 0 ? 0 : workedSeconds;
+        var h = Math.floor(sec / 3600);
+        var m = Math.floor((sec % 3600) / 60);
+        return pad(h) + ':' + pad(m);
+    }
+
+    function updateSelectedWeekCell() {
+        var dayInput = dayForm ? dayForm.querySelector('input[name="day"]') : null;
+        var dayIso = dayInput ? dayInput.value : '';
+        var selected = dayIso
+            ? document.querySelector('.week-strip .week-day[data-date="' + dayIso + '"]')
+            : document.querySelector('.week-strip .week-day.selected');
+        if (!selected) return;
+        var hoursEl = selected.querySelector('.hours');
+        var deltaEl = selected.querySelector('.delta');
+        if (!hoursEl || !deltaEl) return;
+
+        if (holiday.checked) {
+            hoursEl.textContent = 'VAKANTIE';
+            deltaEl.textContent = '';
+            deltaEl.className = 'delta delta-empty';
+            return;
+        }
+        if (sick.checked) {
+            hoursEl.textContent = 'ZIEK';
+            deltaEl.textContent = '';
+            deltaEl.className = 'delta delta-empty';
+            return;
+        }
+
+        var worked = currentWorkedSeconds();
+        hoursEl.textContent = formatWorkedHoursLabel(worked);
+        var minutes = Math.round((worked - contractSeconds) / 60);
+        if (minutes === 0 && hoursEl.textContent === 'VRIJ') {
+            deltaEl.textContent = '';
+            deltaEl.className = 'delta delta-empty';
+            return;
+        }
+        deltaEl.textContent = (minutes > 0 ? '+' : '') + String(minutes);
+        if (minutes > 0) {
+            deltaEl.className = 'delta delta-plus';
+        } else if (minutes < 0) {
+            deltaEl.className = 'delta delta-minus';
+        } else {
+            deltaEl.className = 'delta delta-zero';
+        }
+    }
+
     function updateOvertime() {
-        if (!overtimeMonthEl || !overtimeTotalEl) return;
         var worked = currentWorkedSeconds();
         var contribution = 0;
         if (!holiday.checked && !sick.checked && (contractSeconds > 0 || worked > 0)) {
@@ -1055,14 +1107,29 @@ $headerDateLabel = janus_nl_date_ui($selectedDay);
         }
         var monthExtra = overtimeBaseMonth + contribution;
         var totalExtra = monthExtra + overtimePrevSeconds;
-        overtimeMonthEl.textContent = formatExtraLabel(monthExtra);
-        setOvertimeClass(overtimeMonthEl, monthExtra, false);
+        if (overtimeMonthEl) {
+            overtimeMonthEl.textContent = formatExtraLabel(monthExtra);
+            setOvertimeClass(overtimeMonthEl, monthExtra, false);
+        }
         if (overtimePrevEl) {
             overtimePrevEl.textContent = formatExtraLabel(overtimePrevSeconds);
             setOvertimeClass(overtimePrevEl, overtimePrevSeconds, false);
         }
-        overtimeTotalEl.textContent = 'Totaal: ' + formatExtraLabel(totalExtra);
-        setOvertimeClass(overtimeTotalEl, totalExtra, true);
+        if (overtimeTotalEl) {
+            overtimeTotalEl.textContent = 'Totaal: ' + formatExtraLabel(totalExtra);
+            setOvertimeClass(overtimeTotalEl, totalExtra, true);
+        }
+        updateSelectedWeekCell();
+    }
+
+    function onTimesChanged(ensureOrder) {
+        enableAutosave();
+        if (ensureOrder) {
+            ensureEndAfterStart();
+        }
+        updateDayHeader();
+        updateSelectedWeekCell();
+        scheduleAutosave();
     }
     function updateDayHeader() {
         var dateLabel = header.getAttribute('data-date-label') || '';
@@ -1139,66 +1206,55 @@ $headerDateLabel = janus_nl_date_ui($selectedDay);
 
     document.getElementById('btnStartNow').addEventListener('click', function () {
         start.value = nowHm();
-        ensureEndAfterStart();
-        updateDayHeader();
-        scheduleAutosave();
+        onTimesChanged(true);
     });
     document.getElementById('btnEndNow').addEventListener('click', function () {
         end.value = nowHm();
-        ensureEndAfterStart();
-        updateDayHeader();
-        scheduleAutosave();
+        onTimesChanged(true);
     });
     document.getElementById('btnAutoEnd').addEventListener('click', function () {
         var breakMin = parseInt(brk.value, 10) || 0;
         end.value = formatHm(parseHm(start.value) + contractSeconds + (breakMin * 60));
-        updateDayHeader();
-        scheduleAutosave();
+        onTimesChanged(false);
     });
     Array.prototype.forEach.call(document.querySelectorAll('.break-preset'), function (btn) {
         btn.addEventListener('click', function () {
             brk.value = btn.getAttribute('data-minutes');
-            updateDayHeader();
-            scheduleAutosave();
+            onTimesChanged(false);
         });
     });
 
-    start.addEventListener('input', function () {
-        updateDayHeader();
-        scheduleAutosave();
-    });
-    start.addEventListener('blur', function () {
-        ensureEndAfterStart();
-        updateDayHeader();
-        scheduleAutosave();
-    });
-    end.addEventListener('input', function () {
-        updateDayHeader();
-        scheduleAutosave();
-    });
-    end.addEventListener('blur', function () {
-        ensureEndAfterStart();
-        updateDayHeader();
-        scheduleAutosave();
-    });
-    brk.addEventListener('input', function () { updateDayHeader(); scheduleAutosave(); });
-    brk.addEventListener('change', function () { updateDayHeader(); scheduleAutosave(); });
+    start.addEventListener('input', function () { onTimesChanged(false); });
+    start.addEventListener('change', function () { onTimesChanged(true); });
+    start.addEventListener('blur', function () { onTimesChanged(true); });
+    end.addEventListener('input', function () { onTimesChanged(false); });
+    end.addEventListener('change', function () { onTimesChanged(true); });
+    end.addEventListener('blur', function () { onTimesChanged(true); });
+    brk.addEventListener('input', function () { onTimesChanged(false); });
+    brk.addEventListener('change', function () { onTimesChanged(false); });
 
     holiday.addEventListener('change', function () {
         if (holiday.checked) sick.checked = false;
         applySpecialDayState();
-        updateDayHeader();
-        scheduleAutosave();
+        onTimesChanged(false);
     });
     sick.addEventListener('change', function () {
         if (sick.checked) holiday.checked = false;
         applySpecialDayState();
-        updateDayHeader();
+        onTimesChanged(false);
+    });
+    document.getElementById('homeWorkDriven').addEventListener('change', function () {
+        enableAutosave();
         scheduleAutosave();
     });
-    document.getElementById('homeWorkDriven').addEventListener('change', scheduleAutosave);
-    document.getElementById('kilometers').addEventListener('input', scheduleAutosave);
-    document.getElementById('kilometers').addEventListener('change', scheduleAutosave);
+    document.getElementById('kilometers').addEventListener('input', function () {
+        enableAutosave();
+        scheduleAutosave();
+    });
+    document.getElementById('kilometers').addEventListener('change', function () {
+        enableAutosave();
+        scheduleAutosave();
+    });
 
     // Prevent browser form-restore/autofill from overwriting server day defaults,
     // then writing those restored values via autosave onto a new calendar day.
