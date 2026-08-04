@@ -324,7 +324,10 @@ function hours_day_presence_status(array $data, DateTimeInterface $date, ?DateTi
             }
         }
     }
-    $now = $now ?? new DateTimeImmutable('now');
+    $now = $now ?? new DateTimeImmutable('now', new DateTimeZone('Europe/Amsterdam'));
+    if ($now->getTimezone()->getName() !== 'Europe/Amsterdam') {
+        $now = $now->setTimezone(new DateTimeZone('Europe/Amsterdam'));
+    }
     $weekday = hours_weekday_index($date);
     $contractOff = hours_get_work_hours_seconds($data, $weekday) <= 0;
 
