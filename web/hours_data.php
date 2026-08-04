@@ -182,7 +182,8 @@ function hours_worked_seconds_from_day(array $day): int
 function hours_day_extra_contribution(array $data, DateTimeInterface $date, ?DateTimeInterface $today = null): int
 {
     $today = $today ?? new DateTimeImmutable('today', new DateTimeZone('Europe/Amsterdam'));
-    if ($date > $today) {
+    // Compare calendar dates only (ignore time-of-day on either side).
+    if ($date->format('Y-m-d') > $today->format('Y-m-d')) {
         return 0;
     }
     if (!hours_day_exists($data, $date)) {

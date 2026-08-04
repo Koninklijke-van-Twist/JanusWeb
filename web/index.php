@@ -28,12 +28,12 @@ function janus_parse_selected_day(?string $value): DateTimeImmutable
     if ($value !== '') {
         $fromKey = hours_parse_day_key($value);
         if ($fromKey instanceof DateTimeImmutable) {
-            return $fromKey;
+            return $fromKey->setTime(0, 0, 0);
         }
         if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) === 1) {
-            $dt = DateTimeImmutable::createFromFormat('Y-m-d', $value);
+            $dt = DateTimeImmutable::createFromFormat('!Y-m-d', $value);
             if ($dt instanceof DateTimeImmutable) {
-                return $dt;
+                return $dt->setTime(0, 0, 0);
             }
         }
     }
@@ -199,7 +199,7 @@ $data['UserEmail'] = $email;
 
 $selectedDay = janus_parse_selected_day($_GET['day'] ?? ($_POST['day'] ?? null));
 $today = new DateTimeImmutable('today');
-if ($selectedDay > $today) {
+if ($selectedDay->format('Y-m-d') > $today->format('Y-m-d')) {
     $selectedDay = $today;
 }
 
@@ -209,7 +209,7 @@ $error = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string) ($_POST['action'] ?? 'save');
     $postDay = janus_parse_selected_day($_POST['day'] ?? null);
-    if ($postDay > $today) {
+    if ($postDay->format('Y-m-d') > $today->format('Y-m-d')) {
         $postDay = $today;
     }
 
@@ -229,19 +229,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($error === '') {
         if ($action === 'prev') {
-            $selectedDay = $postDay->modify('-1 day');
+            $selectedDay = $postDay->modify('-1 day')->setTime(0, 0, 0);
         } elseif ($action === 'prevweek') {
-            $selectedDay = $postDay->modify('-7 day');
-        } elseif ($action === 'next' && $postDay < $today) {
-            $selectedDay = $postDay->modify('+1 day');
+            $selectedDay = $postDay->modify('-7 day')->setTime(0, 0, 0);
+        } elseif ($action === 'next' && $postDay->format('Y-m-d') < $today->format('Y-m-d')) {
+            $selectedDay = $postDay->modify('+1 day')->setTime(0, 0, 0);
         } elseif ($action === 'nextweek') {
-            $selectedDay = $postDay->modify('+7 day');
-            if ($selectedDay > $today) {
+            $selectedDay = $postDay->modify('+7 day')->setTime(0, 0, 0);
+            if ($selectedDay->format('Y-m-d') > $today->format('Y-m-d')) {
                 $selectedDay = $today;
             }
         } elseif ($action === 'goto') {
             $selectedDay = janus_parse_selected_day($_POST['goto_day'] ?? null);
-            if ($selectedDay > $today) {
+            if ($selectedDay->format('Y-m-d') > $today->format('Y-m-d')) {
                 $selectedDay = $today;
             }
         } else {
@@ -274,8 +274,8 @@ try {
     // keep UI usable even if write fails after calc
 }
 
-$canGoNext = $selectedDay < $today;
-$canGoNextWeek = $selectedDay->modify('+7 day') <= $today;
+$canGoNext = $selectedDay->format('Y-m-d') < $today->format('Y-m-d');
+$canGoNextWeek = $selectedDay->modify('+7 day')->format('Y-m-d') <= $today->format('Y-m-d');
 $timeDisabled = !empty($dayData['isHoliday']) || !empty($dayData['isSickDay']);
 $monthLabel = sprintf(
     '%s %d',

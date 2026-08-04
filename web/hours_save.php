@@ -21,8 +21,8 @@ function save_parse_day(?string $value): ?DateTimeImmutable
     if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) !== 1) {
         return null;
     }
-    $dt = DateTimeImmutable::createFromFormat('Y-m-d', $value);
-    return $dt instanceof DateTimeImmutable ? $dt : null;
+    $dt = DateTimeImmutable::createFromFormat('!Y-m-d', $value);
+    return $dt instanceof DateTimeImmutable ? $dt->setTime(0, 0, 0) : null;
 }
 
 function save_normalize_time(string $value): string
