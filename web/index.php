@@ -1218,10 +1218,10 @@ $headerDateLabel = janus_nl_date_ui($selectedDay);
     });
 
     start.addEventListener('input', function () { onTimesChanged(false); });
-    start.addEventListener('change', function () { onTimesChanged(true); });
+    start.addEventListener('change', function () { onTimesChanged(false); });
     start.addEventListener('blur', function () { onTimesChanged(true); });
     end.addEventListener('input', function () { onTimesChanged(false); });
-    end.addEventListener('change', function () { onTimesChanged(true); });
+    end.addEventListener('change', function () { onTimesChanged(false); });
     end.addEventListener('blur', function () { onTimesChanged(true); });
     brk.addEventListener('input', function () { onTimesChanged(false); });
     brk.addEventListener('change', function () { onTimesChanged(false); });
