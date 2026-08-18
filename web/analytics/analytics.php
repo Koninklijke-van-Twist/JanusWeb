@@ -72,8 +72,32 @@ function analytics_authorize(string $email, string $apiKey, string $oid): bool
     return function_exists('verify_rotating_api_key') && verify_rotating_api_key($oid, $apiKey);
 }
 
+function analytics_ensure_db_writable(): void
+{
+    $dir = dirname(ANALYTICS_DB_PATH);
+    if (!is_dir($dir) && !mkdir($dir, 0777, true) && !is_dir($dir)) {
+        throw new RuntimeException('Analytics directory could not be created');
+    }
+
+    @chmod($dir, 0777);
+
+    if (!is_writable($dir)) {
+        throw new RuntimeException('Analytics directory is not writable');
+    }
+
+    if (!is_file(ANALYTICS_DB_PATH)) {
+        $created = @touch(ANALYTICS_DB_PATH);
+        if ($created) {
+            @chmod(ANALYTICS_DB_PATH, 0666);
+        }
+    } elseif (!is_writable(ANALYTICS_DB_PATH)) {
+        @chmod(ANALYTICS_DB_PATH, 0666);
+    }
+}
+
 function analytics_pdo(): PDO
 {
+    analytics_ensure_db_writable();
     $pdo = new PDO('sqlite:' . ANALYTICS_DB_PATH);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $pdo->exec(
@@ -163,5 +187,9 @@ try {
     analytics_record_visit($email);
     analytics_json(['ok' => true]);
 } catch (Throwable $error) {
-    analytics_json(['ok' => false, 'error' => 'Visit could not be recorded'], 500);
+    analytics_json([
+        'ok' => false,
+        'error' => 'Visit could not be recorded',
+        'detail' => $error->getMessage(),
+    ], 500);
 }
