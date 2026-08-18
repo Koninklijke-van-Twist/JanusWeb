@@ -3,8 +3,17 @@
 /**
  * Includes/requires
  */
-$loginSessionUser = dirname(__DIR__, 3) . '/login/session_user.php';
-if (is_file($loginSessionUser)) {
+$loginSessionUser = '';
+foreach ([
+    dirname(__DIR__, 2) . '/login/session_user.php',
+    dirname(__DIR__, 3) . '/login/session_user.php',
+] as $loginSessionUserCandidate) {
+    if (is_file($loginSessionUserCandidate)) {
+        $loginSessionUser = $loginSessionUserCandidate;
+        break;
+    }
+}
+if ($loginSessionUser !== '') {
     require_once $loginSessionUser;
 }
 
