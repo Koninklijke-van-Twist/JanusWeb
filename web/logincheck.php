@@ -130,7 +130,7 @@ function janus_emit_analytics_console(array $info): void
     if ($script === '' || str_contains($script, '_api') || str_contains($script, '_save') || str_contains($script, 'excel')) {
         return;
     }
-    if (in_array($script, ['tracker_mode.php', 'export.php'], true)) {
+    if (in_array($script, ['tracker_mode.php', 'export.php', 'hours_vacation.php'], true)) {
         return;
     }
 
