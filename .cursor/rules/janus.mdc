@@ -13,7 +13,7 @@ alwaysApply: true
 
 ## Niet wijzigen
 - Bestand `web/logincheck.php` niet aanpassen.
-- Bestand `web/odata.php` niet aanpassen (gedeelde infra; Janus gebruikt OData momenteel niet in de hoofdflow).
+- Bestand `web/odata.php` niet aanpassen (gedeelde infra; Janus gebruikt OData momenteel niet in de hoofdflow), behalve de `require` van `web/mimir_fallback.php` en de aanroepen vanuit de bestaande OData-entry points. Circuit, environment, auth en de directe BC-route staan in `web/mimir_fallback.php`.
 - Bestand `web/auth.php` alleen aanpassen na expliciete gebruikersvraag.
 
 ## Data en logica
