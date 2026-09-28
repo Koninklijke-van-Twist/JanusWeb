@@ -299,8 +299,18 @@ if (($directRows[0]['No'] ?? '') !== 'WO-1' || !is_array($directCall) || $direct
     fail('lege $mimirApi moet de oude directe route ongewijzigd gebruiken: ' . json_encode($directCall));
 }
 
-$tmpAuth = sys_get_temp_dir() . '/janus-auth-fallback-' . getmypid() . '.php';
-file_put_contents($tmpAuth, <<<'PHP'
+$authPath = dirname(__DIR__) . '/web/auth.php';
+$authBackup = is_file($authPath) ? file_get_contents($authPath) : null;
+register_shutdown_function(static function () use ($authPath, $authBackup): void {
+    if ($authBackup === null) {
+        if (is_file($authPath)) {
+            @unlink($authPath);
+        }
+        return;
+    }
+    file_put_contents($authPath, $authBackup);
+});
+file_put_contents($authPath, <<<'PHP'
 <?php
 $baseUrl = 'https://loaded-bc.example:7148/';
 $environment = 'LoadedEnv';
@@ -311,13 +321,12 @@ $auth = $auth_list['LoadedEnv'];
 $base = 'https://loaded-bc.example:7148/';
 PHP);
 unset($GLOBALS['baseUrl'], $GLOBALS['environment'], $GLOBALS['auth'], $GLOBALS['auth_list'], $GLOBALS['base'], $GLOBALS['JANUS_BC_AUTH_LOAD_TRIED']);
-$GLOBALS['JANUS_AUTH_PHP_PATH'] = $tmpAuth;
 odata_ensure_bc_config_loaded();
 $loadedBase = odata_bc_base_url();
 $loadedUser = (string) ($GLOBALS['auth_list']['LoadedEnv']['user'] ?? '');
 $loadedEnv = odata_bc_environment();
 $loadedAlias = (string) ($GLOBALS['base'] ?? '');
-require_once $tmpAuth;
+require_once $authPath;
 if ($loadedBase !== 'https://loaded-bc.example:7148/') {
     fail('auth.php-variabelen bleven buiten $GLOBALS, base=' . var_export($loadedBase, true));
 }
@@ -336,8 +345,6 @@ if (odata_bc_base_url() !== 'https://keep.example/') {
 if ((string) ($GLOBALS['auth_list']['LoadedEnv']['user'] ?? '') !== 'loaded-user') {
     fail('ontbrekende auth_list werd niet aangevuld');
 }
-@unlink($tmpAuth);
-unset($GLOBALS['JANUS_AUTH_PHP_PATH']);
 if (strpos(fallback_log(), 'loaded-secret') !== false) {
     fail('log bevat het wachtwoord uit auth.php');
 }
