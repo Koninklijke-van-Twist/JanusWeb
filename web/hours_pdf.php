@@ -205,29 +205,56 @@ function janus_logo_pdf_html(string $logoPath = ''): string
 }
 
 /**
- * Build HTML matching classic Janus PDF (oude janus.pdf layout).
- *
- * @param array<string, mixed> $data
+ * How many table body rows fit above the footer area.
+ * First page reserves logo/title; continuation pages start higher.
  */
-function hours_build_pdf_html(
-    array $data,
-    DateTimeInterface $firstDay,
-    DateTimeInterface $lastDay,
-    string $userName,
-    string $userEmail,
-    string $periodLabel,
-    string $logoPath = ''
-): string {
-    $rows = hours_pdf_collect_rows($data, $firstDay, $lastDay);
+function hours_pdf_rows_per_page(bool $isFirstPage): int
+{
+    $tableTop = $isFirstPage ? 160 : 50;
+    $footerTop = 785;
+    $headerHeight = 25;
+    $rowHeight = 25;
+
+    return max(1, (int) floor(($footerTop - $tableTop - $headerHeight) / $rowHeight));
+}
+
+/**
+ * Split row count into page-sized chunks (first page smaller due to header).
+ *
+ * @return list<int>
+ */
+function hours_pdf_page_chunk_sizes(int $totalRows): array
+{
+    if ($totalRows <= 0) {
+        return [0];
+    }
+
+    $chunks = [];
+    $remaining = $totalRows;
+    $first = true;
+    while ($remaining > 0) {
+        $take = min($remaining, hours_pdf_rows_per_page($first));
+        $chunks[] = $take;
+        $remaining -= $take;
+        $first = false;
+    }
+
+    return $chunks;
+}
+
+/**
+ * @param array<string, mixed> $data
+ * @param list<array{date: DateTimeImmutable, day: array<string, mixed>}> $rows
+ * @return array{extraSeconds: int, totalKm: float, labels: list<array{date: string, hours: string, km: string}>}
+ */
+function hours_pdf_prepare_row_labels(array $data, array $rows): array
+{
     $extraSeconds = 0;
     $totalKm = 0.0;
+    $labels = [];
 
-    $rowHtml = '';
-    $shade = false;
     foreach ($rows as $row) {
-        /** @var DateTimeImmutable $date */
         $date = $row['date'];
-        /** @var array<string, mixed> $day */
         $day = $row['day'];
 
         $dayNumber = hours_weekday_index($date);
@@ -250,20 +277,40 @@ function hours_build_pdf_html(
             $totalKm += $dayKm;
         }
 
-        $rowStyle = $shade ? ' style="background:#d3d3d3;"' : '';
-        $rowHtml .= sprintf(
-            '<tr%s>'
-            . '<td style="height:25pt;padding:0 2pt;text-align:left;vertical-align:middle;white-space:nowrap;overflow:hidden;">%s</td>'
-            . '<td style="height:25pt;padding:0 2pt;text-align:left;vertical-align:middle;white-space:nowrap;overflow:hidden;">%s</td>'
-            . '<td style="height:25pt;padding:0 2pt;text-align:left;vertical-align:middle;white-space:nowrap;overflow:hidden;">%s</td>'
-            . '</tr>',
-            $rowStyle,
-            htmlspecialchars(janus_nl_date_pdf_row($date), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
-            htmlspecialchars($hoursLabel, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
-            htmlspecialchars($kmLabel, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')
-        );
-        $shade = !$shade;
+        $labels[] = [
+            'date' => janus_nl_date_pdf_row($date),
+            'hours' => $hoursLabel,
+            'km' => $kmLabel,
+        ];
     }
+
+    return [
+        'extraSeconds' => $extraSeconds,
+        'totalKm' => $totalKm,
+        'labels' => $labels,
+    ];
+}
+
+/**
+ * Build HTML matching classic Janus PDF (oude janus.pdf layout).
+ * Splits across multiple A4 pages when the day list exceeds one page.
+ *
+ * @param array<string, mixed> $data
+ */
+function hours_build_pdf_html(
+    array $data,
+    DateTimeInterface $firstDay,
+    DateTimeInterface $lastDay,
+    string $userName,
+    string $userEmail,
+    string $periodLabel,
+    string $logoPath = ''
+): string {
+    $rows = hours_pdf_collect_rows($data, $firstDay, $lastDay);
+    $prepared = hours_pdf_prepare_row_labels($data, $rows);
+    $extraSeconds = $prepared['extraSeconds'];
+    $totalKm = $prepared['totalKm'];
+    $labels = $prepared['labels'];
 
     $footerLeft = '';
     if ($extraSeconds > 0) {
@@ -287,11 +334,11 @@ function hours_build_pdf_html(
         hours_parse_timespan((string) ($data['SaturdayHours'] ?? '00:00:00')) > 0,
         hours_parse_timespan((string) ($data['SundayHours'] ?? '00:00:00')) > 0,
     ];
-    $labels = ['Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za', 'Zo'];
+    $dayLabels = ['Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za', 'Zo'];
     $gridHtml = '';
     for ($i = 0; $i < 7; $i++) {
         $cls = $active[$i] ? 'day on' : 'day off';
-        $gridHtml .= '<div class="' . $cls . '">' . $labels[$i] . '</div>';
+        $gridHtml .= '<div class="' . $cls . '">' . $dayLabels[$i] . '</div>';
     }
 
     $logoHtml = janus_logo_pdf_html($logoPath);
@@ -318,17 +365,7 @@ function hours_build_pdf_html(
         $gridHtml
     );
 
-    return '<!DOCTYPE html><html><head><meta charset="utf-8"><style>'
-        . $fontFace
-        . '@page { size: A4; margin: 0; }'
-        . 'html,body{margin:0;padding:0;width:210mm;height:297mm;font-family:Verdana,Arial,sans-serif;color:#00529B;background:#fff;}'
-        . '</style></head><body>'
-        . '<div style="position:relative;width:210mm;height:297mm;overflow:hidden;">'
-        . $logoHtml
-        . '<div style="position:absolute;left:50pt;top:100pt;font-size:24pt;font-weight:400;line-height:30pt;">' . $titleEsc . '</div>'
-        . '<div style="position:absolute;left:50pt;top:130pt;font-size:12pt;font-weight:400;line-height:20pt;">' . $emailEsc . '</div>'
-        . '<div style="position:absolute;left:50pt;top:160pt;width:495pt;">'
-        . '<table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:12pt;">'
+    $tableHead = '<table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:12pt;">'
         . '<colgroup>'
         . '<col style="width:200pt;">'
         . '<col style="width:150pt;">'
@@ -338,16 +375,75 @@ function hours_build_pdf_html(
         . '<th style="height:25pt;padding:0 2pt;text-align:left;vertical-align:middle;font-weight:700;">Datum</th>'
         . '<th style="height:25pt;padding:0 2pt;text-align:left;vertical-align:middle;font-weight:700;">Gewerkte uren</th>'
         . '<th style="height:25pt;padding:0 2pt;text-align:left;vertical-align:middle;font-weight:700;">Gereden Kilometers</th>'
-        . '</tr></thead>'
-        . '<tbody>' . $rowHtml . '</tbody>'
-        . '</table>'
-        . '</div>'
-        . '<div style="position:absolute;left:50pt;top:785pt;font-size:12pt;">' . $footerLeft . '</div>'
-        . '<div style="position:absolute;right:50pt;top:792pt;display:flex;align-items:center;gap:10pt;">'
-        . '<div style="font-size:12pt;white-space:nowrap;">Vaste Werkdagen:</div>'
-        . '<div style="width:95pt;display:grid;grid-template-columns:repeat(4, 20pt);grid-template-rows:15pt 15pt;gap:5pt;">' . $gridHtml . '</div>'
-        . '</div>'
-        . '</div></body></html>';
+        . '</tr></thead>';
+
+    $chunks = hours_pdf_page_chunk_sizes(count($labels));
+    $offset = 0;
+    $shade = false;
+    $pagesHtml = '';
+    $pageCount = count($chunks);
+
+    foreach ($chunks as $pageIndex => $chunkSize) {
+        $isFirst = $pageIndex === 0;
+        $isLast = $pageIndex === $pageCount - 1;
+        $tableTop = $isFirst ? 160 : 50;
+
+        $rowHtml = '';
+        for ($i = 0; $i < $chunkSize; $i++) {
+            $label = $labels[$offset + $i];
+            $rowStyle = $shade ? ' style="background:#d3d3d3;"' : '';
+            $rowHtml .= sprintf(
+                '<tr%s>'
+                . '<td style="height:25pt;padding:0 2pt;text-align:left;vertical-align:middle;white-space:nowrap;overflow:hidden;">%s</td>'
+                . '<td style="height:25pt;padding:0 2pt;text-align:left;vertical-align:middle;white-space:nowrap;overflow:hidden;">%s</td>'
+                . '<td style="height:25pt;padding:0 2pt;text-align:left;vertical-align:middle;white-space:nowrap;overflow:hidden;">%s</td>'
+                . '</tr>',
+                $rowStyle,
+                htmlspecialchars($label['date'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
+                htmlspecialchars($label['hours'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
+                htmlspecialchars($label['km'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')
+            );
+            $shade = !$shade;
+        }
+        $offset += $chunkSize;
+
+        $pageHtml = '<div class="page">';
+        if ($isFirst) {
+            $pageHtml .= $logoHtml
+                . '<div style="position:absolute;left:50pt;top:100pt;font-size:24pt;font-weight:400;line-height:30pt;">' . $titleEsc . '</div>'
+                . '<div style="position:absolute;left:50pt;top:130pt;font-size:12pt;font-weight:400;line-height:20pt;">' . $emailEsc . '</div>';
+        } else {
+            $pageHtml .= '<div style="position:absolute;left:50pt;top:20pt;font-size:12pt;font-weight:400;line-height:16pt;">'
+                . $titleEsc . ' (vervolg)</div>';
+        }
+
+        $pageHtml .= '<div style="position:absolute;left:50pt;top:' . $tableTop . 'pt;width:495pt;">'
+            . $tableHead
+            . '<tbody>' . $rowHtml . '</tbody>'
+            . '</table>'
+            . '</div>';
+
+        if ($isLast) {
+            $pageHtml .= '<div style="position:absolute;left:50pt;top:785pt;font-size:12pt;">' . $footerLeft . '</div>'
+                . '<div style="position:absolute;right:50pt;top:792pt;display:flex;align-items:center;gap:10pt;">'
+                . '<div style="font-size:12pt;white-space:nowrap;">Vaste Werkdagen:</div>'
+                . '<div style="width:95pt;display:grid;grid-template-columns:repeat(4, 20pt);grid-template-rows:15pt 15pt;gap:5pt;">' . $gridHtml . '</div>'
+                . '</div>';
+        }
+
+        $pageHtml .= '</div>';
+        $pagesHtml .= $pageHtml;
+    }
+
+    return '<!DOCTYPE html><html><head><meta charset="utf-8"><style>'
+        . $fontFace
+        . '@page { size: A4; margin: 0; }'
+        . 'html,body{margin:0;padding:0;width:210mm;font-family:Verdana,Arial,sans-serif;color:#00529B;background:#fff;}'
+        . '.page{position:relative;width:210mm;height:297mm;overflow:hidden;page-break-after:always;break-after:page;}'
+        . '.page:last-child{page-break-after:auto;break-after:auto;}'
+        . '</style></head><body>'
+        . $pagesHtml
+        . '</body></html>';
 }
 
 /**
@@ -390,130 +486,128 @@ function hours_build_pdf_simple(
     require_once __DIR__ . '/SimplePdf.php';
 
     $pdf = new SimplePdf();
-    $pdf->addPage();
-
-    if ($logoPath !== '' && is_file($logoPath)) {
-        $pdf->setImageJpeg($logoPath, 50, 20, 200, 50);
-    }
-
     $kvt = [0, 82, 155];
-    $pdf->setTextColor($kvt[0], $kvt[1], $kvt[2]);
-    $pdf->text(50, 100, $userName . ', ' . $periodLabel, 24, false);
-    $pdf->text(50, 130, $userEmail, 12, false);
-
-    $rows = hours_pdf_collect_rows($data, $firstDay, $lastDay);
-    $y = 160;
     $rowHeight = 25;
     $pageWidth = 595.28;
     $xDate = 50;
     $xHours = 250;
     $xKm = 400;
+    $title = $userName . ', ' . $periodLabel;
 
-    $pdf->setTextColor($kvt[0], $kvt[1], $kvt[2]);
-    $pdf->text($xDate, $y, 'Datum', 12, true);
-    $pdf->text($xHours, $y, 'Gewerkte uren', 12, true);
-    $pdf->text($xKm, $y, 'Gereden Kilometers', 12, true);
-    $y += $rowHeight;
-
+    $rows = hours_pdf_collect_rows($data, $firstDay, $lastDay);
+    $prepared = hours_pdf_prepare_row_labels($data, $rows);
+    $extraSeconds = $prepared['extraSeconds'];
+    $totalKm = $prepared['totalKm'];
+    $labels = $prepared['labels'];
+    $chunks = hours_pdf_page_chunk_sizes(count($labels));
+    $offset = 0;
     $shade = false;
-    $totalKm = 0.0;
-    $extraSeconds = 0;
+    $pageCount = count($chunks);
 
-    foreach ($rows as $row) {
-        $date = $row['date'];
-        $day = $row['day'];
+    foreach ($chunks as $pageIndex => $chunkSize) {
+        $isFirst = $pageIndex === 0;
+        $isLast = $pageIndex === $pageCount - 1;
 
-        if ($shade) {
-            $pdf->setFillColor(211, 211, 211);
-            $pdf->rect($xDate, $y - 4, $pageWidth - 100, $rowHeight, 'F');
-        }
+        $pdf->addPage();
 
-        $dayNumber = hours_weekday_index($date);
-        $contract = hours_get_work_hours_seconds($data, $dayNumber);
-        if (empty($day['isHoliday'])) {
-            $worked = hours_parse_timespan((string) $day['WorkedTime']);
-            $extraSeconds += ($worked - $contract);
-        }
-
-        $hoursLabel = !empty($day['isHoliday'])
-            ? 'Vakantiedag'
-            : (!empty($day['isSickDay']) ? 'Ziek' : (string) $day['WorkedString']);
-        $dayKm = hours_day_driven_km($day, $data);
-        $kmLabel = (!empty($day['isHoliday']) || !empty($day['isSickDay']))
-            ? 'N.v.t.'
-            : hours_format_km_nl($dayKm);
-
-        if (empty($day['isHoliday']) && empty($day['isSickDay'])) {
-            $totalKm += $dayKm;
+        if ($isFirst) {
+            if ($logoPath !== '' && is_file($logoPath)) {
+                $pdf->setImageJpeg($logoPath, 50, 20, 200, 50);
+            }
+            $pdf->setTextColor($kvt[0], $kvt[1], $kvt[2]);
+            $pdf->text(50, 100, $title, 24, false);
+            $pdf->text(50, 130, $userEmail, 12, false);
+            $y = 160;
+        } else {
+            $pdf->setTextColor($kvt[0], $kvt[1], $kvt[2]);
+            $pdf->text(50, 20, $title . ' (vervolg)', 12, false);
+            $y = 50;
         }
 
         $pdf->setTextColor($kvt[0], $kvt[1], $kvt[2]);
-        $pdf->text($xDate, $y, janus_nl_date_pdf_row($date), 12, false);
-        $pdf->text($xHours, $y, $hoursLabel, 12, false);
-        $pdf->text($xKm, $y, $kmLabel, 12, false);
-
+        $pdf->text($xDate, $y, 'Datum', 12, true);
+        $pdf->text($xHours, $y, 'Gewerkte uren', 12, true);
+        $pdf->text($xKm, $y, 'Gereden Kilometers', 12, true);
         $y += $rowHeight;
-        $shade = !$shade;
-    }
 
-    $y = 785;
-    $pdf->setTextColor($kvt[0], $kvt[1], $kvt[2]);
-    if ($extraSeconds > 0) {
-        $h = (int) floor($extraSeconds / 3600);
-        $m = (int) floor(($extraSeconds % 3600) / 60);
-        $minuteLabel = $m === 1 ? 'minuut' : 'minuten';
-        $pdf->text(50, $y, sprintf('Overgewerkt: %d uur, %d %s', $h, $m, $minuteLabel), 12, true);
-        $y += $rowHeight;
-    }
-    $pdf->text(50, $y, 'Totaal kilometers gereden: ' . number_format($totalKm, 1, ',', ''), 12, true);
-
-    $days = [['Ma', 'Di', 'Wo', 'Do'], ['Vr', 'Za', 'Zo', '']];
-    $isActive = [
-        [
-            hours_parse_timespan((string) ($data['MondayHours'] ?? '00:00:00')) > 0,
-            hours_parse_timespan((string) ($data['TuesdayHours'] ?? '00:00:00')) > 0,
-            hours_parse_timespan((string) ($data['WednesdayHours'] ?? '00:00:00')) > 0,
-            hours_parse_timespan((string) ($data['ThursdayHours'] ?? '00:00:00')) > 0,
-        ],
-        [
-            hours_parse_timespan((string) ($data['FridayHours'] ?? '00:00:00')) > 0,
-            hours_parse_timespan((string) ($data['SaturdayHours'] ?? '00:00:00')) > 0,
-            hours_parse_timespan((string) ($data['SundayHours'] ?? '00:00:00')) > 0,
-            false,
-        ],
-    ];
-
-    $squareW = 20.0;
-    $squareH = 15.0;
-    $spacing = 5.0;
-    $cols = 4;
-    $rowsN = 2;
-    $gridW = $cols * $squareW + ($cols - 1) * $spacing;
-    $startX = $pageWidth - $gridW - 50;
-    $startY = 792.0;
-
-    $pdf->setTextColor($kvt[0], $kvt[1], $kvt[2]);
-    $pdf->text($startX - 110, $startY + 8, 'Vaste Werkdagen:', 12, false);
-
-    for ($r = 0; $r < $rowsN; $r++) {
-        for ($c = 0; $c < $cols; $c++) {
-            if ($days[$r][$c] === '') {
-                continue;
-            }
-            $sx = $startX + $c * ($squareW + $spacing);
-            $sy = $startY + $r * ($squareH + $spacing);
-            if ($isActive[$r][$c]) {
-                $pdf->setFillColor(0, 153, 204);
-            } else {
+        for ($i = 0; $i < $chunkSize; $i++) {
+            $label = $labels[$offset + $i];
+            if ($shade) {
                 $pdf->setFillColor(211, 211, 211);
+                $pdf->rect($xDate, $y - 4, $pageWidth - 100, $rowHeight, 'F');
             }
-            $pdf->rect($sx, $sy, $squareW, $squareH, 'F');
-            if ($isActive[$r][$c]) {
-                $pdf->setTextColor(255, 255, 255);
-            } else {
-                $pdf->setTextColor(128, 128, 128);
+            $pdf->setTextColor($kvt[0], $kvt[1], $kvt[2]);
+            $pdf->text($xDate, $y, $label['date'], 12, false);
+            $pdf->text($xHours, $y, $label['hours'], 12, false);
+            $pdf->text($xKm, $y, $label['km'], 12, false);
+            $y += $rowHeight;
+            $shade = !$shade;
+        }
+        $offset += $chunkSize;
+
+        if (!$isLast) {
+            continue;
+        }
+
+        $y = 785;
+        $pdf->setTextColor($kvt[0], $kvt[1], $kvt[2]);
+        if ($extraSeconds > 0) {
+            $h = (int) floor($extraSeconds / 3600);
+            $m = (int) floor(($extraSeconds % 3600) / 60);
+            $minuteLabel = $m === 1 ? 'minuut' : 'minuten';
+            $pdf->text(50, $y, sprintf('Overgewerkt: %d uur, %d %s', $h, $m, $minuteLabel), 12, true);
+            $y += $rowHeight;
+        }
+        $pdf->text(50, $y, 'Totaal kilometers gereden: ' . number_format($totalKm, 1, ',', ''), 12, true);
+
+        $days = [['Ma', 'Di', 'Wo', 'Do'], ['Vr', 'Za', 'Zo', '']];
+        $isActive = [
+            [
+                hours_parse_timespan((string) ($data['MondayHours'] ?? '00:00:00')) > 0,
+                hours_parse_timespan((string) ($data['TuesdayHours'] ?? '00:00:00')) > 0,
+                hours_parse_timespan((string) ($data['WednesdayHours'] ?? '00:00:00')) > 0,
+                hours_parse_timespan((string) ($data['ThursdayHours'] ?? '00:00:00')) > 0,
+            ],
+            [
+                hours_parse_timespan((string) ($data['FridayHours'] ?? '00:00:00')) > 0,
+                hours_parse_timespan((string) ($data['SaturdayHours'] ?? '00:00:00')) > 0,
+                hours_parse_timespan((string) ($data['SundayHours'] ?? '00:00:00')) > 0,
+                false,
+            ],
+        ];
+
+        $squareW = 20.0;
+        $squareH = 15.0;
+        $spacing = 5.0;
+        $cols = 4;
+        $rowsN = 2;
+        $gridW = $cols * $squareW + ($cols - 1) * $spacing;
+        $startX = $pageWidth - $gridW - 50;
+        $startY = 792.0;
+
+        $pdf->setTextColor($kvt[0], $kvt[1], $kvt[2]);
+        $pdf->text($startX - 110, $startY + 8, 'Vaste Werkdagen:', 12, false);
+
+        for ($r = 0; $r < $rowsN; $r++) {
+            for ($c = 0; $c < $cols; $c++) {
+                if ($days[$r][$c] === '') {
+                    continue;
+                }
+                $sx = $startX + $c * ($squareW + $spacing);
+                $sy = $startY + $r * ($squareH + $spacing);
+                if ($isActive[$r][$c]) {
+                    $pdf->setFillColor(0, 153, 204);
+                } else {
+                    $pdf->setFillColor(211, 211, 211);
+                }
+                $pdf->rect($sx, $sy, $squareW, $squareH, 'F');
+                if ($isActive[$r][$c]) {
+                    $pdf->setTextColor(255, 255, 255);
+                } else {
+                    $pdf->setTextColor(128, 128, 128);
+                }
+                $pdf->text($sx + 3, $sy + 11, $days[$r][$c], 8, false);
             }
-            $pdf->text($sx + 3, $sy + 11, $days[$r][$c], 8, false);
         }
     }
 
