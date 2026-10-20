@@ -80,15 +80,15 @@ function analytics_ensure_htaccess(): void
     $path = $dir . '/.htaccess';
     $rules = "Options -Indexes\n"
         . "# analytics.php blijft het endpoint. Alleen sqlite-bestanden zijn afgesloten.\n"
-        . "\u003cFilesMatch \"\\.sqlite\"\u003e\n"
-        . "    \u003cIfModule mod_authz_core.c\u003e\n"
+        . "<FilesMatch \"\\.sqlite\">\n"
+        . "    <IfModule mod_authz_core.c>\n"
         . "        Require all denied\n"
-        . "    \u003c/IfModule\u003e\n"
-        . "    \u003cIfModule !mod_authz_core.c\u003e\n"
+        . "    </IfModule>\n"
+        . "    <IfModule !mod_authz_core.c>\n"
         . "        Order allow,deny\n"
         . "        Deny from all\n"
-        . "    \u003c/IfModule\u003e\n"
-        . "\u003c/FilesMatch\u003e\n";
+        . "    </IfModule>\n"
+        . "</FilesMatch>\n";
 
     $current = is_file($path) ? (string) @file_get_contents($path) : null;
     if ($current === null) {

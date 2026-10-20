@@ -48,7 +48,7 @@ try {
     $rules = is_file($htaccess) ? (string) file_get_contents($htaccess) : '';
     check($rules !== '', 'ontbrekende .htaccess wordt aangemaakt');
     check(str_contains($body, '"ok":false'), 'endpoint antwoordt nog JSON');
-    check(str_contains($rules, '\u003cFilesMatch "\.sqlite"\u003e'), 'FilesMatch op .sqlite');
+    check(str_contains($rules, '<FilesMatch "\.sqlite">'), 'FilesMatch op .sqlite');
     check(str_contains($rules, 'Require all denied'), 'Require all denied');
     check(str_contains($rules, 'Deny from all'), 'Deny from all voor oudere Apache');
     check(str_contains($rules, 'analytics.php blijft het endpoint'), 'endpoint blijft uitgelegd');
@@ -63,7 +63,7 @@ try {
     run_analytics();
     $appended = (string) file_get_contents($htaccess);
     check(str_starts_with($appended, rtrim($custom)), 'bestaande regels zonder sqlite blijven staan');
-    check(str_contains($appended, '\u003cFilesMatch "\.sqlite"\u003e'), 'sqlite-weigering wordt toegevoegd');
+    check(str_contains($appended, '<FilesMatch "\.sqlite">'), 'sqlite-weigering wordt toegevoegd');
 
     $protected = $appended;
     run_analytics();
