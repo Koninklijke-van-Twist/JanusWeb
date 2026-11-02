@@ -5,6 +5,7 @@
  */
 
 const HOURS_CACHE_DIR = __DIR__ . '/cache/hours';
+const HOURS_MAX_CORRECTION_SECONDS = 999 * 3600;
 
 /**
  * @return array{
@@ -19,6 +20,7 @@ const HOURS_CACHE_DIR = __DIR__ . '/cache/hours';
  *   SundayHours: string,
  *   KilometerHomeWork: float|int,
  *   MonthExtraTicks: array<string, int|float|string>,
+ *   OvertimeCorrections: list<array{Date: string, Seconds: int, Reason: string, By: string}>,
  *   SavedDays: array<string, array<string, mixed>>
  * }
  */
@@ -38,6 +40,7 @@ function hours_default_save_data(string $userName = '', string $userEmail = ''):
         // Mon..Sun — current defaults (from today onward; history covers the past)
         'DefaultOfficeDays' => [true, true, true, true, true, false, false],
         'MonthExtraTicks' => [],
+        'OvertimeCorrections' => [],
         'SavedDays' => [],
     ];
 }
@@ -929,6 +932,9 @@ function hours_load_existing(string $email): ?array
     if (!is_array($data['MonthExtraTicks'] ?? null)) {
         $data['MonthExtraTicks'] = [];
     }
+    if (!is_array($data['OvertimeCorrections'] ?? null)) {
+        $data['OvertimeCorrections'] = [];
+    }
     if (!is_array($data['SavedDays'] ?? null)) {
         $data['SavedDays'] = [];
     }
@@ -1007,6 +1013,9 @@ function hours_load(string $email, string $userName = ''): array
     $data = array_merge(hours_default_save_data($userName, $email), $decoded);
     if (!is_array($data['MonthExtraTicks'] ?? null)) {
         $data['MonthExtraTicks'] = [];
+    }
+    if (!is_array($data['OvertimeCorrections'] ?? null)) {
+        $data['OvertimeCorrections'] = [];
     }
     if (!is_array($data['SavedDays'] ?? null)) {
         $data['SavedDays'] = [];
@@ -1137,6 +1146,62 @@ function hours_calculate_extra_seconds(array &$data, DateTimeInterface $selected
     }
 
     return $extraSeconds;
+}
+
+/**
+ * Handmatige overurencorrecties (append-only). Staan los van MonthExtraTicks, dus ze vallen
+ * nooit uit het rollende venster (huidige + vorige maand) dat uit de dagen herberekend wordt.
+ *
+ * @param array<string, mixed> $data
+ * @return list<array{Date: string, Seconds: int, Reason: string, By: string}>
+ */
+function hours_get_overtime_corrections(array $data): array
+{
+    $out = [];
+    foreach (is_array($data['OvertimeCorrections'] ?? null) ? $data['OvertimeCorrections'] : [] as $row) {
+        if (is_array($row) && (int) ($row['Seconds'] ?? 0) !== 0) {
+            $out[] = [
+                'Date' => (string) ($row['Date'] ?? ''),
+                'Seconds' => (int) $row['Seconds'],
+                'Reason' => (string) ($row['Reason'] ?? ''),
+                'By' => (string) ($row['By'] ?? ''),
+            ];
+        }
+    }
+
+    return $out;
+}
+
+/**
+ * @param array<string, mixed> $data
+ */
+function hours_overtime_corrections_total_seconds(array $data): int
+{
+    return array_sum(array_column(hours_get_overtime_corrections($data), 'Seconds'));
+}
+
+/**
+ * @param array<string, mixed> $data
+ * @throws InvalidArgumentException bij 0 seconden, te grote waarde of lege reden
+ */
+function hours_add_overtime_correction(array &$data, int $seconds, string $reason, string $by, ?DateTimeInterface $at = null): void
+{
+    $reason = trim(preg_replace('/\s+/u', ' ', $reason) ?? '');
+    if ($seconds === 0 || abs($seconds) > HOURS_MAX_CORRECTION_SECONDS) {
+        throw new InvalidArgumentException('Geef een correctie op tussen 1 minuut en 999 uur.');
+    }
+    if (preg_match('/^.{1,200}$/us', $reason) !== 1) {
+        throw new InvalidArgumentException('Geef een reden op (maximaal 200 tekens).');
+    }
+
+    $at = $at ?? new DateTimeImmutable('now', new DateTimeZone('Europe/Amsterdam'));
+    $data['OvertimeCorrections'] = hours_get_overtime_corrections($data);
+    $data['OvertimeCorrections'][] = [
+        'Date' => $at->format('d-m-Y H:i:s'),
+        'Seconds' => $seconds,
+        'Reason' => $reason,
+        'By' => $by,
+    ];
 }
 
 /**

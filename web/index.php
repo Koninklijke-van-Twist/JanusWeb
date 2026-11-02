@@ -261,7 +261,8 @@ $dayData = hours_ensure_day_initialized($data, $selectedDay);
 $weekStrip = janus_week_strip($data, $selectedDay);
 $extra = hours_calculate_extra_seconds($data, $selectedDay, false);
 $extraPrev = hours_calculate_extra_seconds($data, $selectedDay, true);
-$extraTotal = $extra + $extraPrev;
+$extraCorrections = hours_overtime_corrections_total_seconds($data);
+$extraTotal = $extra + $extraPrev + $extraCorrections;
 
 $contractSeconds = hours_get_work_hours_seconds($data, hours_weekday_index($selectedDay));
 $selectedExtraContribution = hours_day_extra_contribution($data, $selectedDay, $today);
@@ -866,10 +867,17 @@ $headerDateLabel = janus_nl_date_ui($selectedDay);
                     <div id="overtimeMonth" class="<?= $extra > 0 ? 'plus' : ($extra < 0 ? 'minus' : 'zero') ?>"><?= janus_h(hours_format_extra_label($extra)) ?></div>
                     <div class="muted">vorige maand</div>
                     <div id="overtimePrev" class="<?= $extraPrev > 0 ? 'plus' : ($extraPrev < 0 ? 'minus' : 'zero') ?>"><?= janus_h(hours_format_extra_label($extraPrev)) ?></div>
+                    <?php if ($extraCorrections !== 0): ?>
+                        <div class="muted">correcties</div>
+                        <div class="<?= $extraCorrections > 0 ? 'plus' : 'minus' ?>"><?= janus_h(hours_format_extra_label($extraCorrections)) ?></div>
+                    <?php endif; ?>
                 </div>
                 <div class="overtime-total">
-                    <div id="overtimeTotal" class="total <?= $extraTotal > 0 ? 'plus' : ($extraTotal < 0 ? 'minus' : 'zero') ?>">
-                        Totaal: <?= janus_h(hours_format_extra_label($extraTotal)) ?>
+                    <div>
+                        <div id="overtimeTotal" class="total <?= $extraTotal > 0 ? 'plus' : ($extraTotal < 0 ? 'minus' : 'zero') ?>">
+                            Totaal: <?= janus_h(hours_format_extra_label($extraTotal)) ?>
+                        </div>
+                        <a class="muted" href="overtime_correction.php?day=<?= janus_h($selectedDay->format('Y-m-d')) ?>">Overuren corrigeren</a>
                     </div>
                 </div>
             </div>
@@ -942,6 +950,7 @@ $headerDateLabel = janus_nl_date_ui($selectedDay);
     var contractSeconds = <?= (int) $contractSeconds ?>;
     var overtimeBaseMonth = <?= (int) $extraBaseWithoutSelected ?>;
     var overtimePrevSeconds = <?= (int) $extraPrev ?>;
+    var overtimeCorrectionSeconds = <?= (int) $extraCorrections ?>;
     var start = document.getElementById('startTime');
     var end = document.getElementById('endTime');
     var brk = document.getElementById('breakMinutes');
@@ -1099,7 +1108,7 @@ $headerDateLabel = janus_nl_date_ui($selectedDay);
             contribution = worked - contractSeconds;
         }
         var monthExtra = overtimeBaseMonth + contribution;
-        var totalExtra = monthExtra + overtimePrevSeconds;
+        var totalExtra = monthExtra + overtimePrevSeconds + overtimeCorrectionSeconds;
         if (overtimeMonthEl) {
             overtimeMonthEl.textContent = formatExtraLabel(monthExtra);
             setOvertimeClass(overtimeMonthEl, monthExtra, false);
