@@ -1090,6 +1090,73 @@ function hours_set_saved_month_extra(array &$data, int $year, int $month, int $s
 }
 
 /**
+ * Overtime of one month, summed from its saved days.
+ *
+ * @param array<string, mixed> $data
+ */
+function hours_month_extra_from_days(array $data, int $year, int $month): int
+{
+    $firstDay = new DateTimeImmutable(sprintf('%04d-%02d-01', $year, $month));
+    $lastDay = $firstDay->modify('last day of this month');
+    $today = new DateTimeImmutable('today', new DateTimeZone('Europe/Amsterdam'));
+    $extraSeconds = 0;
+
+    for ($day = $firstDay; $day <= $lastDay; $day = $day->modify('+1 day')) {
+        $extraSeconds += hours_day_extra_contribution($data, $day, $today);
+    }
+
+    return $extraSeconds;
+}
+
+/**
+ * Overtime per month over all recorded time, oldest first, with running total.
+ * Current and previous month are recomputed from the days. Older months keep their
+ * saved MonthExtraTicks (so a later contract change does not rewrite history); a month
+ * without a saved value is computed from its days and stored.
+ *
+ * @param array<string, mixed> $data
+ * @return list<array{year: int, month: int, seconds: int, cumulative: int}>
+ */
+function hours_extra_history(array &$data): array
+{
+    $now = new DateTimeImmutable('now', new DateTimeZone('Europe/Amsterdam'));
+    $current = (int) $now->format('Y') * 12 + (int) $now->format('n') - 1;
+    $months = [$current => true];
+    foreach (array_keys($data['SavedDays']) as $key) {
+        if (preg_match('/^\d{2}-(\d{2})-(\d{4})$/', (string) $key, $m) === 1) {
+            $months[(int) $m[2] * 12 + (int) $m[1] - 1] = true;
+        }
+    }
+    foreach (array_keys($data['MonthExtraTicks']) as $key) {
+        if (preg_match('/^(\d{2})-(\d{4})$/', (string) $key, $m) === 1) {
+            $months[(int) $m[2] * 12 + (int) $m[1] - 1] = true;
+        }
+    }
+    ksort($months);
+
+    $history = [];
+    $cumulative = 0;
+    foreach (array_keys($months) as $index) {
+        if ($index > $current) {
+            continue;
+        }
+        $year = intdiv($index, 12);
+        $month = $index % 12 + 1;
+        $saved = $data['MonthExtraTicks'][hours_month_key($month, $year)] ?? null;
+        if ($index >= $current - 1 || $saved === null || $saved === '') {
+            $seconds = hours_month_extra_from_days($data, $year, $month);
+            hours_set_saved_month_extra($data, $year, $month, $seconds);
+        } else {
+            $seconds = hours_get_saved_month_extra_seconds($data, $year, $month);
+        }
+        $cumulative += $seconds;
+        $history[] = ['year' => $year, 'month' => $month, 'seconds' => $seconds, 'cumulative' => $cumulative];
+    }
+
+    return $history;
+}
+
+/**
  * Mirrors MainForm.CalculateExtraHours.
  *
  * @param array<string, mixed> $data
@@ -1107,14 +1174,7 @@ function hours_calculate_extra_seconds(array &$data, DateTimeInterface $selected
         }
     }
 
-    $firstDay = new DateTimeImmutable(sprintf('%04d-%02d-01', $year, $month));
-    $lastDay = $firstDay->modify('last day of this month');
-    $today = new DateTimeImmutable('today', new DateTimeZone('Europe/Amsterdam'));
-    $extraSeconds = 0;
-
-    for ($day = $firstDay; $day <= $lastDay; $day = $day->modify('+1 day')) {
-        $extraSeconds += hours_day_extra_contribution($data, $day, $today);
-    }
+    $extraSeconds = hours_month_extra_from_days($data, $year, $month);
 
     hours_set_saved_month_extra($data, $year, $month, $extraSeconds);
 
