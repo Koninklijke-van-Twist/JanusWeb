@@ -261,11 +261,13 @@ $dayData = hours_ensure_day_initialized($data, $selectedDay);
 $weekStrip = janus_week_strip($data, $selectedDay);
 $extra = hours_calculate_extra_seconds($data, $selectedDay, false);
 $extraPrev = hours_calculate_extra_seconds($data, $selectedDay, true);
-$extraTotal = $extra + $extraPrev;
+$extraHistory = hours_extra_history($data);
+$extraTotal = $extraHistory[count($extraHistory) - 1]['cumulative'];
 
 $contractSeconds = hours_get_work_hours_seconds($data, hours_weekday_index($selectedDay));
 $selectedExtraContribution = hours_day_extra_contribution($data, $selectedDay, $today);
 $extraBaseWithoutSelected = $extra - $selectedExtraContribution;
+$extraTotalBaseWithoutSelected = $extraTotal - $selectedExtraContribution;
 
 // Persist refreshed MonthExtraTicks
 try {
@@ -868,8 +870,11 @@ $headerDateLabel = janus_nl_date_ui($selectedDay);
                     <div id="overtimePrev" class="<?= $extraPrev > 0 ? 'plus' : ($extraPrev < 0 ? 'minus' : 'zero') ?>"><?= janus_h(hours_format_extra_label($extraPrev)) ?></div>
                 </div>
                 <div class="overtime-total">
-                    <div id="overtimeTotal" class="total <?= $extraTotal > 0 ? 'plus' : ($extraTotal < 0 ? 'minus' : 'zero') ?>">
-                        Totaal: <?= janus_h(hours_format_extra_label($extraTotal)) ?>
+                    <div>
+                        <div id="overtimeTotal" class="total <?= $extraTotal > 0 ? 'plus' : ($extraTotal < 0 ? 'minus' : 'zero') ?>">
+                            Totaal: <?= janus_h(hours_format_extra_label($extraTotal)) ?>
+                        </div>
+                        <a class="muted" href="overtime_history.php?day=<?= janus_h($selectedDay->format('Y-m-d')) ?>">Historie</a>
                     </div>
                 </div>
             </div>
@@ -941,6 +946,7 @@ $headerDateLabel = janus_nl_date_ui($selectedDay);
 (function () {
     var contractSeconds = <?= (int) $contractSeconds ?>;
     var overtimeBaseMonth = <?= (int) $extraBaseWithoutSelected ?>;
+    var overtimeTotalBase = <?= (int) $extraTotalBaseWithoutSelected ?>;
     var overtimePrevSeconds = <?= (int) $extraPrev ?>;
     var start = document.getElementById('startTime');
     var end = document.getElementById('endTime');
@@ -1099,7 +1105,7 @@ $headerDateLabel = janus_nl_date_ui($selectedDay);
             contribution = worked - contractSeconds;
         }
         var monthExtra = overtimeBaseMonth + contribution;
-        var totalExtra = monthExtra + overtimePrevSeconds;
+        var totalExtra = overtimeTotalBase + contribution;
         if (overtimeMonthEl) {
             overtimeMonthEl.textContent = formatExtraLabel(monthExtra);
             setOvertimeClass(overtimeMonthEl, monthExtra, false);
